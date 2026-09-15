@@ -33,7 +33,7 @@ public class AbstractBatcher<T> where T : struct, IVertexType
         _graphicsDevice = graphicsDevice;
         _effect = effect;
 
-        mainTextureParameter = _effect.Parameters["MainTexture"];
+        mainTextureParameter = _effect.FindTextureParameter("MainTexture");
         worldViewProjParameter = _effect.Parameters["WorldViewProj"];
     }
 
@@ -51,18 +51,33 @@ public class AbstractBatcher<T> where T : struct, IVertexType
             this.depthStencilState = depthStencilState;
     }
 
+    /// <summary>
+    /// stride-2048 fork: world-space (map pixel) coordinate of the render target's top-left corner.
+    /// Zero when the render target covers the whole map; the camera-follow origin when oversized
+    /// maps are rendered with viewport-sized targets. Vertices are always in absolute map pixels,
+    /// so the projection maps [origin, origin + targetSize] onto the target.
+    /// </summary>
+    public Microsoft.Xna.Framework.Point WorldRenderOrigin { get; set; }
+
     public void End()
     {
-        // Build orthographic projection
+        // Build orthographic projection covering the world-space region this target represents
         Matrix projection = Matrix.CreateOrthographicOffCenter(
-            0, _graphicsDevice.Viewport.Width,
-            _graphicsDevice.Viewport.Height, 0,
+            WorldRenderOrigin.X, WorldRenderOrigin.X + _graphicsDevice.Viewport.Width,
+            WorldRenderOrigin.Y + _graphicsDevice.Viewport.Height, WorldRenderOrigin.Y,
             0, -1);
 
         // Upload it to the shader
         worldViewProjParameter.SetValue(projection);
 
         _graphicsDevice.DepthStencilState = depthStencilState;
+
+        // stride-2048 fork / DesktopGL: the paletted effects use two texture units (main tile + palette).
+        // On OpenGL the palette sampler (unit 1) is left unbound / mis-sampled unless its sampler state
+        // is set explicitly, producing grayscale terrain. Point sampling is also required so the palette
+        // index lookup is not interpolated.
+        _graphicsDevice.SamplerStates[0] = SamplerState.PointClamp;
+        _graphicsDevice.SamplerStates[1] = SamplerState.PointClamp;
 
         for (int i = 0; i < queuedBatches.Count; i++)
         {

@@ -155,7 +155,7 @@ public class MapView : IMapView, IMapScreenCropper
     public LightingPreviewMode LightingPreviewState => EditorState.IsLighting ? EditorState.LightingPreviewState : LightingPreviewMode.NoLighting;
     public Randomizer Randomizer => EditorState.Randomizer;
 
-    public Texture2D MinimapTexture => minimapRenderTarget;
+    public Texture2D MinimapTexture => minimapRenderTarget.RenderTarget;
 
     /// <summary>
     /// Tracks users of the minimap.
@@ -167,18 +167,30 @@ public class MapView : IMapView, IMapScreenCropper
 
     public MapWideOverlay MapWideOverlay { get; private set; }
 
-    private RenderTarget2D mapRenderTarget;                      // Render target for terrain
-    private RenderTarget2D transparencyRenderTarget;             // Render target for map UI elements (celltags etc.) that are only refreshed if something in the map changes (due to performance reasons)
-    private RenderTarget2D transparencyPerFrameRenderTarget;     // Render target for map UI elements that are redrawn each frame
-    private RenderTarget2D compositeRenderTarget;                // Render target where all the above is combined
-    private RenderTarget2D compositeRenderTargetCopy;
-    private RenderTarget2D alphaRenderTarget;                    // Render target for alpha map
-    private RenderTarget2D minimapRenderTarget;                  // For minimap and megamap rendering
+    private MapRenderTarget mapRenderTarget;                      // Render target for terrain
+    private MapRenderTarget transparencyRenderTarget;             // Render target for map UI elements (celltags etc.) that are only refreshed if something in the map changes (due to performance reasons)
+    private MapRenderTarget transparencyPerFrameRenderTarget;     // Render target for map UI elements that are redrawn each frame
+    private MapRenderTarget compositeRenderTarget;                // Render target where all the above is combined
+    private MapRenderTarget compositeRenderTargetCopy;
+    private MapRenderTarget alphaRenderTarget;                    // Render target for alpha map
+    private MapRenderTarget minimapRenderTarget;                  // For minimap and megamap rendering
 
     private Effect palettedTerrainDrawEffect;                    // Effect for rendering terrain
     private Effect palettedColorDrawEffect;                      // Effect for rendering textures, both paletted and RGBA, with or without remap
     private Effect alphaMapDrawEffect;                           // Effect for rendering the alpha light map
     private Effect alphaImageToAlphaMapEffect;                   // Effect for rendering a single alpha image to the alpha light map
+    private Effect passthroughDrawEffect;                        // Plain sprite drawing with an explicit WorldViewProj, for world-space UI passes
+
+    // stride-2048 fork: when the map's pixel dimensions exceed the maximum GPU texture size, the
+    // render targets cannot cover the whole map. In that case they are sized to the visible area
+    // (plus padding) and follow the camera: renderOrigin is the world-space (map pixel) coordinate
+    // of the targets' top-left corner, and every world-space pass projects
+    // [renderOrigin, renderOrigin + targetSize] onto the target. For maps that fit, the targets
+    // still cover the whole map and renderOrigin stays (0, 0), preserving the original behavior.
+    private bool useCameraFollowRenderTargets;
+    private Point renderOrigin;
+    private int renderTargetWidth;
+    private int renderTargetHeight;
 
     private TerrainBatcher terrainBatcher;
     private GameObjectBatcher gameObjectBatcher;
@@ -573,6 +585,7 @@ public class MapView : IMapView, IMapScreenCropper
     private void LoadShaders()
     {
         palettedTerrainDrawEffect = AssetLoader.LoadEffect("Shaders/PalettedTerrainDraw");
+        passthroughDrawEffect = AssetLoader.LoadEffect("Shaders/PassthroughDraw");
         palettedColorDrawEffect = AssetLoader.LoadEffect("Shaders/PalettedColorDraw");
         alphaMapDrawEffect = AssetLoader.LoadEffect("Shaders/AlphaMapApply");
         alphaImageToAlphaMapEffect = AssetLoader.LoadEffect("Shaders/AlphaImageToAlphaMap");
@@ -624,15 +637,95 @@ public class MapView : IMapView, IMapScreenCropper
     {
         ClearRenderTargets();
 
-        mapRenderTarget = CreateFullMapRenderTarget(SurfaceFormat.Color, DepthFormat.Depth24Stencil8);
-        transparencyRenderTarget = CreateFullMapRenderTarget(SurfaceFormat.Color);
-        transparencyPerFrameRenderTarget = CreateFullMapRenderTarget(SurfaceFormat.Color);
-        compositeRenderTarget = CreateFullMapRenderTarget(SurfaceFormat.Color, DepthFormat.Depth24);
-        compositeRenderTargetCopy = CreateFullMapRenderTarget(SurfaceFormat.Color);
-        alphaRenderTarget = CreateFullMapRenderTarget(SurfaceFormat.Alpha8);
-        minimapRenderTarget = CreateFullMapRenderTarget(SurfaceFormat.Color);
+        // stride-2048 fork: decide between whole-map render targets (original behavior) and
+        // camera-follow targets for maps too large for a single GPU texture.
+        int worldWidth = Map.WidthInPixels;
+        int worldHeight = Map.HeightInPixelsWithCellHeight;
+        useCameraFollowRenderTargets = worldWidth > RenderingConstants.MaximumDX11TextureSize ||
+            worldHeight > RenderingConstants.MaximumDX11TextureSize;
 
-        Constants.DepthRenderStep = (float)Constants.CellSizeY / mapRenderTarget.Height;
+        if (useCameraFollowRenderTargets)
+        {
+            // Cover the currently visible world area (which grows as the user zooms out) plus
+            // scroll padding. The targets are re-created from Draw() if the user zooms out beyond
+            // their coverage. Clamped to the maximum texture size; if the visible area exceeds even
+            // that, the edges of the view are left unrendered.
+            int neededWidth = (int)(Width / Camera.ZoomLevel) + (Constants.RenderPixelPadding + Constants.CellSizeX) * 2;
+            int neededHeight = (int)(Height / Camera.ZoomLevel) + (Constants.RenderPixelPadding + Constants.CellSizeY) * 2 + Constants.MapYBaseline;
+            renderTargetWidth = Math.Min(Math.Min(worldWidth, neededWidth), RenderingConstants.MaximumDX11TextureSize);
+            renderTargetHeight = Math.Min(Math.Min(worldHeight, neededHeight), RenderingConstants.MaximumDX11TextureSize);
+        }
+        else
+        {
+            renderTargetWidth = worldWidth;
+            renderTargetHeight = worldHeight;
+        }
+
+        renderOrigin = Point.Zero;
+        UpdateWorldRenderOrigin();
+        Logger.Log($"RefreshRenderTargets: cameraFollow={useCameraFollowRenderTargets}, target size {renderTargetWidth}x{renderTargetHeight}, world size {worldWidth}x{worldHeight}");
+
+        mapRenderTarget = CreateMapRenderTarget(SurfaceFormat.Color, DepthFormat.Depth24Stencil8);
+        transparencyRenderTarget = CreateMapRenderTarget(SurfaceFormat.Color);
+        transparencyPerFrameRenderTarget = CreateMapRenderTarget(SurfaceFormat.Color);
+        compositeRenderTarget = CreateMapRenderTarget(SurfaceFormat.Color, DepthFormat.Depth24);
+        compositeRenderTargetCopy = CreateMapRenderTarget(SurfaceFormat.Color);
+        alphaRenderTarget = CreateMapRenderTarget(SurfaceFormat.Alpha8);
+        minimapRenderTarget = CreateMapRenderTarget(SurfaceFormat.Color);
+
+        // Depth is normalized over the map's full pixel height (see CellMath depth functions);
+        // anchor the per-height-level step to the map rather than the render target so it is
+        // independent of the render target sizing mode. For whole-map targets this value is
+        // identical to the previous target-height-derived one.
+        Constants.DepthRenderStep = (float)Constants.CellSizeY / Map.HeightInPixelsWithCellHeight;
+
+        InvalidateMap();
+    }
+
+    /// <summary>
+    /// Updates the camera-follow render origin from the camera position. Returns true if the
+    /// origin changed (meaning the world-space render targets must be fully redrawn).
+    /// </summary>
+    private bool UpdateWorldRenderOrigin()
+    {
+        Point newOrigin = Point.Zero;
+
+        if (useCameraFollowRenderTargets)
+        {
+            int padding = Constants.RenderPixelPadding + Constants.CellSizeX;
+            int maxX = Math.Max(0, Map.WidthInPixels - renderTargetWidth);
+            int maxY = Math.Max(0, Map.HeightInPixelsWithCellHeight - renderTargetHeight);
+            newOrigin = new Point(
+                Math.Clamp(Camera.TopLeftPoint.X - padding, 0, maxX),
+                Math.Clamp(Camera.TopLeftPoint.Y - padding, 0, maxY));
+        }
+
+        bool changed = newOrigin != renderOrigin;
+        renderOrigin = newOrigin;
+
+        if (terrainBatcher != null)
+            terrainBatcher.WorldRenderOrigin = renderOrigin;
+        if (gameObjectBatcher != null)
+            gameObjectBatcher.WorldRenderOrigin = renderOrigin;
+
+        return changed;
+    }
+
+    private Matrix GetWorldProjection()
+    {
+        return Matrix.CreateOrthographicOffCenter(
+            renderOrigin.X, renderOrigin.X + renderTargetWidth,
+            renderOrigin.Y + renderTargetHeight, renderOrigin.Y,
+            0, -1);
+    }
+
+    /// <summary>
+    /// Uploads the world-space projection to an effect used for drawing in absolute map pixel
+    /// coordinates. With whole-map render targets this equals the plain target-sized projection.
+    /// </summary>
+    private void ApplyWorldProjection(Effect effect)
+    {
+        effect.Parameters["WorldViewProj"].SetValue(GetWorldProjection());
     }
 
     private void CreateDepthStencilStates()
@@ -713,12 +806,12 @@ public class MapView : IMapView, IMapScreenCropper
         unitRenderer = new UnitRenderer(CreateRenderDependencies());
     }
 
-    private RenderTarget2D CreateFullMapRenderTarget(SurfaceFormat surfaceFormat, DepthFormat depthFormat = DepthFormat.None)
+    private MapRenderTarget CreateMapRenderTarget(SurfaceFormat surfaceFormat, DepthFormat depthFormat = DepthFormat.None)
     {
-       return new RenderTarget2D(GraphicsDevice,
-           Map.WidthInPixels,
-           Map.HeightInPixels + (Constants.CellHeight * Constants.MaxMapHeightLevel), false, surfaceFormat,
-           depthFormat, 0, RenderTargetUsage.PreserveContents);
+       return new MapRenderTarget(GraphicsDevice,
+           renderTargetWidth,
+           renderTargetHeight,
+           surfaceFormat, depthFormat);
     }
 
     public void DrawVisibleMapPortion()
@@ -754,6 +847,7 @@ public class MapView : IMapView, IMapScreenCropper
 
         var palettedTerrainDrawSettings = new SpriteBatchSettings(SpriteSortMode.Deferred, BlendState.Opaque, null, depthReadStencilState, null, palettedTerrainDrawEffect);
         Renderer.PushRenderTarget(mapRenderTarget, palettedTerrainDrawSettings);
+        ApplyWorldProjection(palettedTerrainDrawEffect);
 
         // Smudges can be drawn as part of regular terrain.
         // Afterwards, we need to switch to the more complex shader, so we pop rendering settings.
@@ -764,12 +858,14 @@ public class MapView : IMapView, IMapScreenCropper
         SetPaletteEffectParams(palettedColorDrawEffect, TheaterGraphics.TheaterPalette.GetTexture(), true, false, false);
         var palettedColorDrawSettings = new SpriteBatchSettings(SpriteSortMode.Deferred, BlendState.Opaque, null, depthReadStencilState, null, palettedColorDrawEffect);
         Renderer.PushSettings(palettedColorDrawSettings);
+        ApplyWorldProjection(palettedColorDrawEffect);
         DrawFlatOverlays();
 
         Renderer.PopRenderTarget();
 
         // Render non-flat objects
         Renderer.PushRenderTarget(mapRenderTarget, new SpriteBatchSettings(SpriteSortMode.Deferred, BlendState.AlphaBlend, null, objectRenderStencilState, null, palettedColorDrawEffect));
+        ApplyWorldProjection(palettedColorDrawEffect);
 
         DrawBuildings();
         DrawGameObjects();
@@ -785,7 +881,10 @@ public class MapView : IMapView, IMapScreenCropper
 
     private void DrawMapUIElements()
     {
-        Renderer.PushRenderTarget(transparencyRenderTarget, new SpriteBatchSettings(SpriteSortMode.Deferred, BlendState.AlphaBlend, null, null, null, null));
+        // stride-2048 fork: drawn in absolute map pixel coordinates, so use the passthrough effect
+        // with the world projection (equals the plain target projection for whole-map targets).
+        Renderer.PushRenderTarget(transparencyRenderTarget, new SpriteBatchSettings(SpriteSortMode.Deferred, BlendState.AlphaBlend, null, null, null, passthroughDrawEffect));
+        ApplyWorldProjection(passthroughDrawEffect);
         GraphicsDevice.Clear(Color.Transparent);
 
         if ((EditorState.RenderObjectFlags & RenderObjectFlags.BaseNodes) == RenderObjectFlags.BaseNodes)
@@ -817,17 +916,19 @@ public class MapView : IMapView, IMapScreenCropper
     {
         if (paletteTexture != null)
         {
-            effect.Parameters["PaletteTexture"].SetValue(paletteTexture);
+            effect.FindTextureParameter("PaletteTexture").SetValue(paletteTexture);
         }
 
-        effect.Parameters["IsShadow"].SetValue(isShadow);
-        effect.Parameters["UsePalette"].SetValue(usePalette);
-        effect.Parameters["UseRemap"].SetValue(useRemap);
+        // DesktopGL: these shader uniforms are floats (see PalettedColorDraw.fx) so branching works
+        // on the OpenGL ps_3_0 profile; pass 1.0f / 0.0f instead of bool.
+        effect.Parameters["IsShadow"].SetValue(isShadow ? 1f : 0f);
+        effect.Parameters["UsePalette"].SetValue(usePalette ? 1f : 0f);
+        effect.Parameters["UseRemap"].SetValue(useRemap ? 1f : 0f);
     }
 
     private void SetTerrainEffectParams(Texture2D paletteTexture)
     {
-        palettedTerrainDrawEffect.Parameters["PaletteTexture"].SetValue(paletteTexture);
+        palettedTerrainDrawEffect.FindTextureParameter("PaletteTexture").SetValue(paletteTexture);
     }
 
     private void DoForVisibleCells(Action<MapTile> action)
@@ -837,7 +938,10 @@ public class MapView : IMapView, IMapScreenCropper
         int camRight;
         int camBottom;
 
-        if (renderingWholeMapForScreenCrop || (minimapNeedsRefresh && MinimapUsers.Count > 0))
+        // stride-2048 fork: whole-map rendering is only possible when the render targets cover the
+        // whole map; with camera-follow targets these paths are disabled.
+        if (!useCameraFollowRenderTargets &&
+            (renderingWholeMapForScreenCrop || (minimapNeedsRefresh && MinimapUsers.Count > 0)))
         {
             // If the minimap needs a full refresh, then we need to re-render the whole map
             tlX = 0;
@@ -1919,9 +2023,36 @@ public class MapView : IMapView, IMapScreenCropper
 
         if (currentScreenCropRequest != null)
         {
-            screenCropLayout = currentScreenCropRequest.CalculatedPixelLayout;
-            renderingWholeMapForScreenCrop = true;
-            InvalidateMap();
+            // stride-2048 fork: screenshots render the whole map into the composite target, which
+            // camera-follow render targets cannot do.
+            if (useCameraFollowRenderTargets)
+            {
+                FailScreenCropRequest(currentScreenCropRequest,
+                    new InvalidOperationException("Screenshots are not yet supported for maps too large for whole-map render targets."));
+                currentScreenCropRequest = null;
+            }
+            else
+            {
+                screenCropLayout = currentScreenCropRequest.CalculatedPixelLayout;
+                renderingWholeMapForScreenCrop = true;
+                InvalidateMap();
+            }
+        }
+
+        // stride-2048 fork: with camera-follow render targets, grow the targets if the user zoomed
+        // out beyond their coverage, and re-anchor them when the camera has moved.
+        if (useCameraFollowRenderTargets)
+        {
+            int visibleWorldWidth = (int)(Width / Camera.ZoomLevel);
+            int visibleWorldHeight = (int)(Height / Camera.ZoomLevel);
+            if ((visibleWorldWidth > renderTargetWidth && renderTargetWidth < RenderingConstants.MaximumDX11TextureSize) ||
+                (visibleWorldHeight > renderTargetHeight && renderTargetHeight < RenderingConstants.MaximumDX11TextureSize))
+            {
+                RefreshRenderTargets();
+            }
+
+            if (UpdateWorldRenderOrigin())
+                InvalidateMap();
         }
 
         try
@@ -1947,10 +2078,12 @@ public class MapView : IMapView, IMapScreenCropper
 
             if (EditorState.DrawMapWideOverlay)
             {
+                // stride-2048 fork: the overlay covers the whole map in world space; use the map's
+                // pixel dimensions rather than the render target's (they differ in camera-follow mode).
                 MapWideOverlay.Draw(new Rectangle(Camera.ScaleIntWithZoom(-Camera.TopLeftPoint.X),
                     Camera.ScaleIntWithZoom(-Camera.TopLeftPoint.Y + Constants.MapYBaseline),
-                    Camera.ScaleIntWithZoom(mapRenderTarget.Width),
-                    Camera.ScaleIntWithZoom(mapRenderTarget.Height - Constants.MapYBaseline)));
+                    Camera.ScaleIntWithZoom(Map.WidthInPixels),
+                    Camera.ScaleIntWithZoom(Map.HeightInPixelsWithCellHeight - Constants.MapYBaseline)));
             }
 
             if (isActive && tileUnderCursor != null && cursorAction != null)
@@ -1974,7 +2107,10 @@ public class MapView : IMapView, IMapScreenCropper
 
     private void DrawPerFrameTransparentElements(TechnoBase technoUnderCursor)
     {
-        Renderer.PushRenderTarget(transparencyPerFrameRenderTarget);
+        // stride-2048 fork: drawn in absolute map pixel coordinates, so use the passthrough effect
+        // with the world projection (equals the plain target projection for whole-map targets).
+        Renderer.PushRenderTarget(transparencyPerFrameRenderTarget, new SpriteBatchSettings(SpriteSortMode.Deferred, BlendState.AlphaBlend, null, null, null, passthroughDrawEffect));
+        ApplyWorldProjection(passthroughDrawEffect);
 
         GraphicsDevice.Clear(Color.Transparent);
 
@@ -1989,6 +2125,14 @@ public class MapView : IMapView, IMapScreenCropper
     /// </summary>
     public void DrawOnMinimap()
     {
+        // stride-2048 fork: the minimap needs a whole-map texture, which camera-follow render
+        // targets cannot provide. Minimap contents are unavailable for such maps for now.
+        if (useCameraFollowRenderTargets)
+        {
+            minimapNeedsRefresh = false;
+            return;
+        }
+
         if (MinimapUsers.Count > 0)
         {
             Renderer.PushRenderTarget(minimapRenderTarget);
@@ -2021,7 +2165,9 @@ public class MapView : IMapView, IMapScreenCropper
 
         // Constrain draw coordinates so that we don't draw out of bounds and cause weird artifacts on map edge
 
-        int sourceX = Camera.TopLeftPoint.X;
+        // stride-2048 fork: the composite render target's top-left corner is at renderOrigin in
+        // world space (always zero with whole-map render targets).
+        int sourceX = Camera.TopLeftPoint.X - renderOrigin.X;
         int destinationX = 0;
         int destinationWidth = Width;
         if (sourceX < 0)
@@ -2032,7 +2178,7 @@ public class MapView : IMapView, IMapScreenCropper
             zoomedWidth += Camera.TopLeftPoint.X;
         }
 
-        int sourceY = Camera.TopLeftPoint.Y;
+        int sourceY = Camera.TopLeftPoint.Y - renderOrigin.Y;
         int destinationY = 0;
         int destinationHeight = Height;
         if (sourceY < 0)
@@ -2109,6 +2255,11 @@ public class MapView : IMapView, IMapScreenCropper
                 var alphaDrawRectangle = new Rectangle(pixelPoint.X - alphaTexture.ShapeWidth / 2 + alphaTexture.OffsetX,
                     pixelPoint.Y - alphaTexture.ShapeHeight / 2 + alphaTexture.OffsetY, alphaTexture.Texture.Width, alphaTexture.Texture.Height);
 
+                // stride-2048 fork: this pass uses a pixel-shader-only effect (SpriteBatch's default
+                // vertex transform, which is target-relative), so apply the world render origin to
+                // the rectangle directly. No-op with whole-map render targets.
+                alphaDrawRectangle.Offset(-renderOrigin.X, -renderOrigin.Y);
+
                 Renderer.DrawTexture(alphaTexture.Texture, alphaDrawRectangle, Color.White);
             }
 
@@ -2121,7 +2272,7 @@ public class MapView : IMapView, IMapScreenCropper
             Renderer.PopSettings();
 
             GraphicsDevice.SetRenderTarget(compositeRenderTarget);
-            alphaMapDrawEffect.Parameters["RenderSurface"].SetValue(compositeRenderTargetCopy);
+            alphaMapDrawEffect.FindTextureParameter("RenderSurface").SetValue(compositeRenderTargetCopy);
             Renderer.PushSettings(new SpriteBatchSettings(SpriteSortMode.Deferred, BlendState.Opaque, SamplerState.PointClamp, null, null, alphaMapDrawEffect));
             Renderer.DrawTexture(alphaRenderTarget, new Rectangle(0, 0, alphaRenderTarget.Width, alphaRenderTarget.Height), Color.White);
             Renderer.PopSettings();
@@ -2155,6 +2306,13 @@ public class MapView : IMapView, IMapScreenCropper
 
     public void AddPreviewToMap(MegamapRenderOptions megamapRenderOptions)
     {
+        // stride-2048 fork: megamap generation needs whole-map render targets.
+        if (useCameraFollowRenderTargets)
+        {
+            Logger.Log("AddPreviewToMap: skipped; not yet supported for maps too large for whole-map render targets.");
+            return;
+        }
+
         var megamapTexture = GenerateMegamapTexture(megamapRenderOptions);
 
         // Scale down the minimap texture
@@ -2202,6 +2360,18 @@ public class MapView : IMapView, IMapScreenCropper
 
     public void ExtractMegamapTo(MegamapRenderOptions megamapRenderOptions, string path)
     {
+        // stride-2048 fork: megamap generation needs whole-map render targets.
+        if (useCameraFollowRenderTargets)
+        {
+            Logger.Log("ExtractMegamapTo: skipped; not yet supported for maps too large for whole-map render targets.");
+            EditorMessageBox.Show(windowManager,
+                Translate(this, "ExtractMegamapTo.TooLarge.Title", "Map too large"),
+                Translate(this, "ExtractMegamapTo.TooLarge.Description",
+                    "Megamap extraction is not yet supported for maps too large for whole-map render targets."),
+                MessageBoxButtons.OK);
+            return;
+        }
+
         var megamapTexture = GenerateMegamapTexture(megamapRenderOptions);
 
         try

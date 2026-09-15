@@ -4,7 +4,7 @@ using Rampastring.XNAUI;
 using Rampastring.XNAUI.XNAControls;
 using System;
 using System.Globalization;
-using System.Windows.Forms;
+using Microsoft.Xna.Framework.Graphics;
 using TSMapEditor.Settings;
 using TSMapEditor.UI.Controls;
 using TSMapEditor.UI.Windows;
@@ -112,8 +112,10 @@ public class SettingsPanel : INItializableWindow
 
         const int MinWidth = 1024;
         const int MinHeight = 600;
-        int MaxWidth = Screen.PrimaryScreen.Bounds.Width;
-        int MaxHeight = Screen.PrimaryScreen.Bounds.Height;
+        // stride-2048 fork / DesktopGL: use the MonoGame display mode instead of the Windows-only
+        // System.Windows.Forms.Screen for the primary display resolution.
+        int MaxWidth = GraphicsAdapter.DefaultAdapter.CurrentDisplayMode.Width;
+        int MaxHeight = GraphicsAdapter.DefaultAdapter.CurrentDisplayMode.Height;
 
         ddRenderScale = FindChild<XNADropDown>(nameof(ddRenderScale));
         var renderScales = new double[] { 4.0, 2.5, 3.0, 2.5, 2.0, 1.75, 1.5, 1.25, 1.0, 0.75, 0.5 };

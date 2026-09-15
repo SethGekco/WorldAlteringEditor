@@ -2,7 +2,7 @@
 using MapEditorLibrary.Models;
 using System;
 using System.IO;
-using System.Windows.Forms;
+using MapEditorLibrary.Misc;
 
 namespace TSMapEditor.UI.Windows;
 
@@ -39,15 +39,15 @@ public class CopiedTriggerData
         }
 
         byte[] bytes = memoryStream.ToArray();
-        Clipboard.SetData(Constants.ClipboardTriggerActionEventFormatValue, bytes);
+        CrossPlatformClipboard.SetData(Constants.ClipboardTriggerActionEventFormatValue, bytes);
     }
 
     public TriggerAction GetTriggerActionFromClipboard()
     {
-        if (!Clipboard.ContainsData(Constants.ClipboardTriggerActionEventFormatValue))
+        if (!CrossPlatformClipboard.ContainsData(Constants.ClipboardTriggerActionEventFormatValue))
             return null;
 
-        var bytes = (byte[])Clipboard.GetData(Constants.ClipboardTriggerActionEventFormatValue);
+        var bytes = (byte[])CrossPlatformClipboard.GetData(Constants.ClipboardTriggerActionEventFormatValue);
 
         using var memoryStream = new MemoryStream(bytes);
 
@@ -65,10 +65,10 @@ public class CopiedTriggerData
 
     public TriggerCondition GetTriggerEventFromClipboard()
     {
-        if (!Clipboard.ContainsData(Constants.ClipboardTriggerActionEventFormatValue))
+        if (!CrossPlatformClipboard.ContainsData(Constants.ClipboardTriggerActionEventFormatValue))
             return null;
 
-        var bytes = (byte[])Clipboard.GetData(Constants.ClipboardTriggerActionEventFormatValue);
+        var bytes = (byte[])CrossPlatformClipboard.GetData(Constants.ClipboardTriggerActionEventFormatValue);
 
         using var memoryStream = new MemoryStream(bytes);
         int hasTriggerEvent = memoryStream.ReadByte();
@@ -113,10 +113,10 @@ public class CopiedTriggerData
 
     private bool HasTriggerActionOrEventData(bool skipEvent)
     {
-        if (!Clipboard.ContainsData(Constants.ClipboardTriggerActionEventFormatValue))
+        if (!CrossPlatformClipboard.ContainsData(Constants.ClipboardTriggerActionEventFormatValue))
             return false;
 
-        byte[] bytes = (byte[])Clipboard.GetData(Constants.ClipboardTriggerActionEventFormatValue);
+        byte[] bytes = (byte[])CrossPlatformClipboard.GetData(Constants.ClipboardTriggerActionEventFormatValue);
 
         using var memoryStream = new MemoryStream(bytes);
 
@@ -129,7 +129,7 @@ public class CopiedTriggerData
 
     public void ClearValuesIfClipboardEmpty()
     {
-        if (Clipboard.ContainsData(Constants.ClipboardTriggerActionEventFormatValue))
+        if (CrossPlatformClipboard.ContainsData(Constants.ClipboardTriggerActionEventFormatValue))
             return;
 
         CopiedTriggerAction = null;

@@ -281,11 +281,35 @@ public class TileSelector : EditorWindow
             if (tileSet.NonMarbleMadness > -1)
                 continue;
 
-            if (tileSet.AllowToPlace && tileSet.LoadedTileCount > 0)
+            // stride-2048 fork: also list normally-hidden tile sets (LAT variants, transition
+            // pieces) with a marker prefix, so individual tiles that Auto-LAT/randomization
+            // normally manage can be browsed and hand-placed. Auto-LAT can be toggled off in the
+            // top bar when placing them.
+            if (tileSet.LoadedTileCount > 0)
             {
+                string displayName = tileSet.TranslatedName;
+
+                if (!tileSet.AllowToPlace)
+                {
+                    // Skip junk sets that are useless to hand-place (per user feedback):
+                    // blank/obsolete/marble-madness height pieces and rubble frame variants.
+                    string lowerName = tileSet.SetName.ToLowerInvariant();
+                    if (lowerName.Contains("blank") || lowerName.Contains("obsolete height") ||
+                        lowerName.Contains("mm height") || lowerName.Contains("rubble"))
+                    {
+                        continue;
+                    }
+
+                    // Label Auto-LAT transition sets by the ground they belong to.
+                    var latGround = theaterGraphics.Theater.LATGrounds.Find(lg => lg.TransitionTileSet == tileSet);
+                    displayName = latGround != null
+                        ? $"* {latGround.DisplayName} edge pieces (Auto-LAT)"
+                        : "* " + displayName;
+                }
+
                 lbTileSetList.AddItem(new XNAListBoxItem()
                 {
-                    Text = tileSet.TranslatedName,
+                    Text = displayName,
                     Tag = tileSet,
                     TextColor = tileSet.Color.HasValue ? tileSet.Color.Value : UISettings.ActiveSettings.AltColor
                 });

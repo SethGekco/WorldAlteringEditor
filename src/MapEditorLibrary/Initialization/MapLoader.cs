@@ -132,6 +132,11 @@ public static class MapLoader
         int height = int.Parse(parts[3], CultureInfo.InvariantCulture);
         map.Size = new Point2D(width, height);
 
+        // stride-2048 fork: pick the packed-cell-coordinate base for this map. Oversized maps carry
+        // the [MapSizeExt] CoordBase= tag (trusted when present); otherwise derive it from the size.
+        Constants.CellCoordBase = mapIni.GetIntValue(Constants.MapSizeExtSectionName,
+            Constants.MapSizeExtCoordBaseKey, Constants.GetCellCoordBaseForMapSize(width, height));
+
         string localSize = section.GetStringValue("LocalSize", null);
         if (localSize == null)
             throw new MapLoadException("Invalid [Map] LocalSize=");
@@ -248,12 +253,13 @@ public static class MapLoader
 
         foreach (var kvp in section.Keys)
         {
-            string coords = kvp.Key;
-            int yLength = coords.Length - 3;
-            int y = Conversions.IntFromString(coords.Substring(0, yLength), -1);
-            int x = Conversions.IntFromString(coords.Substring(yLength), -1);
-            if (y < 0 || x < 0)
+            // stride-2048 fork: parse the packed coordinate through the shared CoordBase-aware helper.
+            Point2D? coordsPoint = Helpers.CoordStringToPoint(kvp.Key);
+            if (coordsPoint == null)
                 continue;
+
+            int x = coordsPoint.Value.X;
+            int y = coordsPoint.Value.Y;
 
             TerrainType terrainType = map.Rules.TerrainTypes.Find(tt => tt.ININame == kvp.Value);
             if (terrainType == null)
@@ -755,6 +761,35 @@ public static class MapLoader
         Logger.Log("Smudges read successfully.");
     }
 
+    /// <summary>
+    /// stride-2048 fork: computes the total decoded size of Format5-block data by walking the
+    /// block headers (2 bytes input size + 2 bytes output size per block) without decompressing.
+    /// Used to detect the stride an OverlayPack was written at.
+    /// </summary>
+    private static long GetFormat5DecodedSize(byte[] src)
+    {
+        long total = 0;
+        int position = 0;
+
+        while (position + 4 <= src.Length)
+        {
+            int inputSize = src[position] | (src[position + 1] << 8);
+            int outputSize = src[position + 2] | (src[position + 3] << 8);
+
+            if (inputSize == 0 || outputSize == 0)
+                break;
+
+            position += 4;
+            if (position + inputSize > src.Length)
+                break;
+
+            position += inputSize;
+            total += outputSize;
+        }
+
+        return total;
+    }
+
     public static void ReadOverlays(IMap map, IniFile mapIni)
     {
         Logger.Log("Reading Overlays (OverlayPack and OverlayDataPack).");
@@ -765,18 +800,41 @@ public static class MapLoader
             return;
 
         bool needsExtendedOverlayPack = map.Basic.NewINIFormat >= 5;
+        int overlayBytesPerCell = needsExtendedOverlayPack ? 2 : 1;
 
         var stringBuilder = new StringBuilder();
         overlayPackSection.Keys.ForEach(kvp => stringBuilder.Append(kvp.Value));
         byte[] compressedData = Convert.FromBase64String(stringBuilder.ToString());
-        byte[] uncompressedOverlayPack = new byte[Constants.MAX_MAP_LENGTH_IN_DIMENSION * Constants.MAX_MAP_LENGTH_IN_DIMENSION * (needsExtendedOverlayPack ? 2 : 1)];
+
+        // stride-2048 fork: the overlay stride is baked into the map file, so it must be chosen per
+        // map. The total decoded size of the pack (stride * stride * bytes-per-cell, regardless of
+        // content) is the ground truth for the stride it was written at; the [MapSizeExt]
+        // RequiredStride= tag and the map-size heuristic are fallbacks for inconclusive data.
+        // This keeps vanilla 512-stride maps and legacy oversized maps (written with vanilla-sized,
+        // typically empty, overlay packs) loading correctly.
+        int overlayPackStride = mapIni.GetIntValue(Constants.MapSizeExtSectionName,
+            Constants.MapSizeExtRequiredStrideKey, Constants.GetOverlayPackStride(map.Size.X, map.Size.Y));
+
+        long decodedSize = GetFormat5DecodedSize(compressedData);
+        if (decodedSize == (long)Constants.VANILLA_MAP_LENGTH_IN_DIMENSION * Constants.VANILLA_MAP_LENGTH_IN_DIMENSION * overlayBytesPerCell)
+            overlayPackStride = Constants.VANILLA_MAP_LENGTH_IN_DIMENSION;
+        else if (decodedSize == (long)Constants.MAX_MAP_LENGTH_IN_DIMENSION * Constants.MAX_MAP_LENGTH_IN_DIMENSION * overlayBytesPerCell)
+            overlayPackStride = Constants.MAX_MAP_LENGTH_IN_DIMENSION;
+        else
+            Logger.Log($"ReadOverlays: OverlayPack decoded size {decodedSize} matches no known stride; assuming stride {overlayPackStride}.");
+
+        Logger.Log($"ReadOverlays: using overlay stride {overlayPackStride}.");
+
+        byte[] uncompressedOverlayPack = new byte[overlayPackStride * overlayPackStride * overlayBytesPerCell];
         Format5.DecodeInto(compressedData, uncompressedOverlayPack, Constants.OverlayPackFormat);
 
         stringBuilder.Clear();
         overlayDataPackSection.Keys.ForEach(kvp => stringBuilder.Append(kvp.Value));
         compressedData = Convert.FromBase64String(stringBuilder.ToString());
-        byte[] uncompressedOverlayDataPack = new byte[Constants.MAX_MAP_LENGTH_IN_DIMENSION * Constants.MAX_MAP_LENGTH_IN_DIMENSION];
+        byte[] uncompressedOverlayDataPack = new byte[overlayPackStride * overlayPackStride];
         Format5.DecodeInto(compressedData, uncompressedOverlayDataPack, Constants.OverlayPackFormat);
+
+        int overlayCellCount = overlayPackStride * overlayPackStride;
 
         for (int y = 0; y < map.Tiles.Length; y++)
         {
@@ -786,7 +844,12 @@ public static class MapLoader
                 if (tile == null)
                     continue;
 
-                int overlayDataIndex = (tile.Y * Constants.MAX_MAP_LENGTH_IN_DIMENSION) + tile.X;
+                int overlayDataIndex = (tile.Y * overlayPackStride) + tile.X;
+
+                // Cells whose packed index falls outside the pack (possible when a legacy oversized
+                // map carries a vanilla-sized overlay pack) simply have no overlay.
+                if (overlayDataIndex >= overlayCellCount)
+                    continue;
 
                 int overlayTypeIndex;
                 if (needsExtendedOverlayPack)

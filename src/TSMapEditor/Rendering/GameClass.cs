@@ -98,10 +98,19 @@ public class GameClass : Microsoft.Xna.Framework.Game
 
         Logger.Log("Exiting.");
 
+#if WINDOWS
         windowManager?.HideWindow();
-        System.Windows.Forms.MessageBox.Show("The map editor has crashed." + Environment.NewLine + Environment.NewLine +
+#endif
+        string crashMessage = "The map editor has crashed." + Environment.NewLine + Environment.NewLine +
             "Exception information logged into except.txt:" + Environment.NewLine + Environment.NewLine +
-            sb.ToString());
+            sb.ToString();
+#if WINDOWS
+        System.Windows.Forms.MessageBox.Show(crashMessage);
+#else
+        // stride-2048 fork / DesktopGL: no WinForms message box available; the details are already
+        // in except.txt (see above) and mirrored to stderr here.
+        Console.Error.WriteLine(crashMessage);
+#endif
 
         Environment.Exit(255);
     }
@@ -180,7 +189,14 @@ public class GameClass : Microsoft.Xna.Framework.Game
 
         windowManager.SetRenderResolution(menuRenderWidth, menuRenderHeight);
         windowManager.CenterOnScreen();
+        // stride-2048 fork / DesktopGL: LoadNativeCursor is a Windows-only XNAUI (WindowsDX) API. On
+        // other platforms it isn't loaded, so show the OS hardware cursor (MonoGame hides it by
+        // default) to guarantee a visible cursor everywhere in the editor.
+#if WINDOWS
         windowManager.Cursor.LoadNativeCursor(Environment.CurrentDirectory + DSC + "Content" + DSC + "cursor.cur");
+#else
+        IsMouseVisible = true;
+#endif
         windowManager.SetBorderlessMode(false);
 
         Components.Add(windowManager);

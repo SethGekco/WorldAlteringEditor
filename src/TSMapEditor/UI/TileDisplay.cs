@@ -194,13 +194,24 @@ public class TileDisplay : XNAPanel
         int x = Constants.UIEmptySideSpace;
         int currentLineHeight = 0;
 
+        // stride-2048 fork: list every graphical variant (clear00.tem, clear00a.tem...) of every
+        // tile as its own entry, deterministically, instead of showing one randomly-picked variant
+        // per tile. Lets LAT ground variants (grass, sand etc.) be browsed and hand-placed.
+        var tileEntries = new List<(int tileIndex, int variant)>();
         for (int i = 0; i < TileSet.TilesInSet; i++)
         {
-            int tileIndex = TileSet.StartTileIndex + i;
-            if (tileIndex > theaterGraphics.TileCount)
+            int entryTileIndex = TileSet.StartTileIndex + i;
+            if (entryTileIndex > theaterGraphics.TileCount)
                 break;
 
-            MGTileImage tileImageToPlace = theaterGraphics.GetTileGraphics(tileIndex);
+            int variantCount = editorState.IsMarbleMadness ? 1 : theaterGraphics.GetTileVariantCount(entryTileIndex);
+            for (int v = 0; v < variantCount; v++)
+                tileEntries.Add((entryTileIndex, v));
+        }
+
+        foreach ((int tileIndex, int variant) in tileEntries)
+        {
+            MGTileImage tileImageToPlace = theaterGraphics.GetTileGraphics(tileIndex, variant);
             MGTileImage tileImageToDisplay = editorState.IsMarbleMadness ? theaterGraphics.GetMarbleMadnessTileGraphics(tileIndex) : tileImageToPlace;
 
             if (tileImageToDisplay == null)
@@ -331,7 +342,7 @@ public class TileDisplay : XNAPanel
 
                 if (!paletteTextureSet)
                 {
-                    palettedDrawEffect.Parameters["PaletteTexture"].SetValue(image.GetPaletteTexture());
+                    palettedDrawEffect.FindTextureParameter("PaletteTexture").SetValue(image.GetPaletteTexture());
 
                     palettedDrawEffect.Parameters["Lighting"].SetValue(map.Lighting.MapColorFromPreviewMode(editorState.LightingPreviewState).ToXNAVector4());
 

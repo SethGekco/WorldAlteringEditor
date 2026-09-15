@@ -25,7 +25,8 @@ public class CreateNewMapEventArgs : EventArgs
 public class CreateNewMapWindow : INItializableWindow
 {
     private const int MinMapSize = 50;
-    private const int MaxMapSize = 512;
+    // stride-2048 fork: width + height cap equals the overlay/cell coordinate stride.
+    private const int MaxMapSize = Constants.MAX_MAP_LENGTH_IN_DIMENSION;
 
     public CreateNewMapWindow(WindowManager windowManager) : base(windowManager)
     {

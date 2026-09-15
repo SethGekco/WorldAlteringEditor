@@ -171,6 +171,9 @@ public class TheaterGraphics : ITheater, ITheaterTileData
 
     public MGTileImage GetTileGraphics(int id) => terrainGraphicsList[id][random.Next(terrainGraphicsList[id].Length)];
     public MGTileImage GetTileGraphics(int id, int variantId) => terrainGraphicsList[id][variantId];
+
+    /// <summary>stride-2048 fork: number of loaded graphical variants (clear00.tem, clear00a.tem...) of a tile.</summary>
+    public int GetTileVariantCount(int id) => terrainGraphicsList[id].Length;
     public MGTileImage GetMarbleMadnessTileGraphics(int id) => mmTerrainGraphicsList[id][0];
     public bool HasSeparateMarbleMadnessTileGraphics(int id) => hasMMGraphics[id];
     public TileImage GetTileImage(int id) => terrainGraphicsList[id][0];
@@ -215,7 +218,10 @@ public class TheaterGraphics : ITheater, ITheaterTileData
             alphaPaletteColors[i] = new RGBColor((byte)i, (byte)i, (byte)i);
         alphaPalette = new XNAPalette("AlphaPalette", alphaPaletteColors, graphicsDevice, false);
 
-        if (UserSettings.Instance.MultithreadedTextureLoading)
+        // stride-2048 fork / DesktopGL: multithreaded loading creates GPU textures on background
+        // threads, which is unsafe on OpenGL (the GL context is single-threaded) and deadlocks
+        // partway through (e.g. ReadBuildingTextures). Force serial loading off Windows.
+        if (UserSettings.Instance.MultithreadedTextureLoading && OperatingSystem.IsWindows())
         {
             var task1 = Task.Factory.StartNew(() => ReadTileTextures());
             var task2 = Task.Factory.StartNew(() => ReadTerrainObjectTextures(rules.TerrainTypes));

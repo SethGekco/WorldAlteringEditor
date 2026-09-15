@@ -37,6 +37,6 @@ public class Infantry : Foot<InfantryType>
 
     public override int GetHashCode()
     {
-        return ((int)WhatAmI() * 10000000) + (Position.Y * 512) + (Position.X * 10) + (int)SubCell;
+        return ((int)WhatAmI() * 10000000) + (Position.Y * Constants.MAX_MAP_LENGTH_IN_DIMENSION) + (Position.X * 10) + (int)SubCell;
     }
 }

@@ -371,7 +371,10 @@ public class TriggersWindow : INItializableWindow
         lbTriggers.RightClick += (s, e) => { lbTriggers.OnMouseLeftDown(new InputEventArgs()); triggerContextMenu.Open(GetCursorPoint()); };
         lbTriggers.SelectedIndexChanged += LbTriggers_SelectedIndexChanged;
 
+        // stride-2048 fork / DesktopGL: WindowSizeChangedByUser is a Windows-only XNAUI (WindowsDX) event.
+#if WINDOWS
         WindowManager.WindowSizeChangedByUser += WindowManager_WindowSizeChangedByUser;
+#endif
         map.ScriptingChanged += Map_ScriptingChanged;
     }
 
@@ -626,7 +629,9 @@ public class TriggersWindow : INItializableWindow
 
     public override void Kill()
     {
+#if WINDOWS
         WindowManager.WindowSizeChangedByUser -= WindowManager_WindowSizeChangedByUser;
+#endif
         base.Kill();
     }
 

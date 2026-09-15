@@ -118,7 +118,15 @@ class UIManager : XNAControl, IWindowParentControl
         Name = nameof(UIManager);
 
         // We should be the first control to subscribe to this event
+        // stride-2048 fork / DesktopGL: WindowSizeChangedByUser is a Windows-only XNAUI (WindowsDX)
+        // event; on other platforms MonoGame's cross-platform ClientSizeChanged provides the same
+        // notification, keeping the render resolution (and thus text scaling and mouse-to-tile
+        // mapping) in sync with the window size.
+#if WINDOWS
         WindowManager.WindowSizeChangedByUser += WindowManager_WindowSizeChangedByUser;
+#else
+        Game.Window.ClientSizeChanged += WindowManager_WindowSizeChangedByUser;
+#endif
         WindowManager.RenderResolutionChanged += WindowManager_RenderResolutionChanged;
 
         InitTheme();
@@ -218,7 +226,10 @@ class UIManager : XNAControl, IWindowParentControl
         // This makes the exit process technically faster, but the editor stays longer on the
         // screen so practically increases exit time from the user's perspective
         // WindowManager.GameClosing += (s, e) => ClearResources();
+        // stride-2048 fork / DesktopGL: SetMaximizeBox is a Windows-only XNAUI (WindowsDX) API.
+#if WINDOWS
         WindowManager.SetMaximizeBox(true);
+#endif
         WindowManager.GameClosing += WindowManager_GameClosing;
         KeyboardCommands.Instance.ToggleFullscreen.Triggered += ToggleFullscreen_Triggered;
 
@@ -275,16 +286,23 @@ class UIManager : XNAControl, IWindowParentControl
         InitialDisplayModeSet = true;
 
         Game.Window.AllowUserResizing = true;
-        var form = (System.Windows.Forms.Form)System.Windows.Forms.Form.FromHandle(Game.Window.Handle);
 
-        var screen = System.Windows.Forms.Screen.FromHandle(Game.Window.Handle);
-        int width = screen.Bounds.Width - 300;
-        int height = screen.Bounds.Height - 200;
+        // stride-2048 fork / DesktopGL: the WinForms Form/Screen handle interop is Windows-only. On
+        // other platforms use the MonoGame display mode for the primary display resolution.
+#if WINDOWS
+        var screenWidth = System.Windows.Forms.Screen.FromHandle(Game.Window.Handle).Bounds.Width;
+        var screenHeight = System.Windows.Forms.Screen.FromHandle(Game.Window.Handle).Bounds.Height;
+#else
+        var screenWidth = Microsoft.Xna.Framework.Graphics.GraphicsAdapter.DefaultAdapter.CurrentDisplayMode.Width;
+        var screenHeight = Microsoft.Xna.Framework.Graphics.GraphicsAdapter.DefaultAdapter.CurrentDisplayMode.Height;
+#endif
+        int width = screenWidth - 300;
+        int height = screenHeight - 200;
         bool borderless = UserSettings.Instance.FullscreenWindowed;
         if (borderless)
         {
-            width = screen.Bounds.Width;
-            height = screen.Bounds.Height;
+            width = screenWidth;
+            height = screenHeight;
         }
 
         WindowManager.InitGraphicsMode(width, height, borderless);
@@ -589,7 +607,11 @@ class UIManager : XNAControl, IWindowParentControl
         overlayPlacementAction.OverlayTypeChanged -= OverlayPlacementAction_OverlayTypeChanged;
 
         WindowManager.GameClosing -= WindowManager_GameClosing;
+#if WINDOWS
         WindowManager.WindowSizeChangedByUser -= WindowManager_WindowSizeChangedByUser;
+#else
+        Game.Window.ClientSizeChanged -= WindowManager_WindowSizeChangedByUser;
+#endif
         WindowManager.RenderResolutionChanged -= WindowManager_RenderResolutionChanged;
         KeyboardCommands.Instance.ToggleFullscreen.Triggered -= ToggleFullscreen_Triggered;
 

@@ -45,7 +45,7 @@ public abstract class GameObject : AbstractObject, IMovable
 
     public override int GetHashCode()
     {
-        return (int)WhatAmI() * 10000000 + Position.Y * 512 + Position.X;
+        return (int)WhatAmI() * 10000000 + Position.Y * Constants.MAX_MAP_LENGTH_IN_DIMENSION + Position.X;
     }
 
     public virtual bool Remapable() => false;

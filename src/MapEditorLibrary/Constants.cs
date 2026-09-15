@@ -94,7 +94,59 @@ public static class Constants
 
     public static int MaxHouseTechLevel = 10;
 
-    public const int MAX_MAP_LENGTH_IN_DIMENSION = 512;
+    // stride-2048 fork: overlay pack stride / max cell coordinate raised from 512.
+    // This is the on-disk OverlayPack index stride (overlayIndex = Y * this + X) and
+    // must match the game engine's patched overlay-array stride (see MapSizeExt).
+    public const int MAX_MAP_LENGTH_IN_DIMENSION = 2048;
+
+    // The unmodified game's overlay stride / max cell coordinate (width + height <= 512).
+    public const int VANILLA_MAP_LENGTH_IN_DIMENSION = 512;
+
+    /// <summary>
+    /// stride-2048 fork: the OverlayPack stride is baked into each map file, so it must be chosen
+    /// per map. Vanilla-sized maps (width + height within the unmodified game's limit) use the
+    /// vanilla 512 stride so they stay byte-compatible with the unmodified game and FA2/WAE;
+    /// larger maps (which only run on a MapSizeExt-patched game) use the extended stride.
+    /// TODO(MapSizeExt): once MapSizeExt defines its map tag, honor that tag here (both when
+    /// reading, to trust the tag over the size heuristic, and when writing, to emit the tag on
+    /// extended-stride maps).
+    /// </summary>
+    public static int GetOverlayPackStride(int mapWidth, int mapHeight)
+    {
+        return mapWidth + mapHeight <= VANILLA_MAP_LENGTH_IN_DIMENSION
+            ? VANILLA_MAP_LENGTH_IN_DIMENSION
+            : MAX_MAP_LENGTH_IN_DIMENSION;
+    }
+
+    // stride-2048 fork: the [MapSizeExt] per-map tag section, shared with the MapSizeExt game DLL.
+    // CoordBase is the base used for packed cell coordinates (waypoint/celltag/terrain keys,
+    // packed = Y * base + X). Vanilla packs in base 1000; maps with width + height > 1000 cannot,
+    // and use the next power of two >= width + height instead. RequiredStride records the
+    // OverlayPack stride so the DLL can warn/adapt when a map exceeds its configured stride.
+    public const string MapSizeExtSectionName = "MapSizeExt";
+    public const string MapSizeExtCoordBaseKey = "CoordBase";
+    public const string MapSizeExtRequiredStrideKey = "RequiredStride";
+
+    public const int VANILLA_CELL_COORD_BASE = 1000;
+
+    /// <summary>
+    /// The packed-cell-coordinate base of the currently loaded map. Set from the map's
+    /// [MapSizeExt] CoordBase= tag (or derived from its size) on load, and re-derived on save.
+    /// </summary>
+    public static int CellCoordBase = VANILLA_CELL_COORD_BASE;
+
+    public static int GetCellCoordBaseForMapSize(int mapWidth, int mapHeight)
+    {
+        int sum = mapWidth + mapHeight;
+        if (sum <= VANILLA_CELL_COORD_BASE)
+            return VANILLA_CELL_COORD_BASE;
+
+        int powerOfTwo = 1;
+        while (powerOfTwo < sum)
+            powerOfTwo <<= 1;
+
+        return powerOfTwo;
+    }
     public const int NO_OVERLAY = -1;
     public const int OverlayPackFormat = 80;
 
@@ -137,9 +189,13 @@ public static class Constants
         IniFile constantsIni = Helpers.ReadConfigINI("Constants.ini");
 
         CellSizeX = constantsIni.GetIntValue(ConstantsSectionName, nameof(CellSizeX), CellSizeX);
-        MaxMapWidth = TextureSizeLimit / CellSizeX;
         CellSizeY = constantsIni.GetIntValue(ConstantsSectionName, nameof(CellSizeY), CellSizeY);
-        MaxMapHeight = TextureSizeLimit / CellSizeY;
+
+        // stride-2048 fork: maps larger than a single GPU texture are rendered with camera-follow
+        // render targets, so the per-axis limits are no longer bound by the texture size limit.
+        // The effective limit is the extended coordinate stride (also applied as width + height).
+        MaxMapWidth = MAX_MAP_LENGTH_IN_DIMENSION;
+        MaxMapHeight = MAX_MAP_LENGTH_IN_DIMENSION;
 
         TileColorBufferSize = constantsIni.GetIntValue(ConstantsSectionName, nameof(TileColorBufferSize), TileColorBufferSize);
 

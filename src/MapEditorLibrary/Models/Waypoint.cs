@@ -68,7 +68,7 @@ public class Waypoint : AbstractObject, IMovable
 
     public void WriteToIniFile(IniFile iniFile)
     {
-        int tileIndex = Position.Y * 1000 + Position.X;
+        int tileIndex = Position.Y * Constants.CellCoordBase + Position.X;
         iniFile.SetIntValue("Waypoints", Identifier.ToString(), tileIndex);
 
         // Write entry to [EditorWaypointInfo]

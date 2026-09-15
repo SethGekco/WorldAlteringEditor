@@ -44,8 +44,16 @@ float4 MainPS(VertexShaderOutput input) : COLOR
 {
     float4 tex = tex2D(SpriteTextureSampler, input.TextureCoordinates);
 
+    // stride-2048 fork / DesktopGL: SurfaceFormat.Alpha8 maps to a single-channel (red) texture on
+    // OpenGL, so the palette index is in .r rather than .a.
+#if OPENGL
+    float tileIndex = tex.r;
+#else
+    float tileIndex = tex.a;
+#endif
+
     // Get color from palette
-    float4 paletteColor = tex2D(PaletteTextureSampler, float2(tex.a, 0.5));
+    float4 paletteColor = tex2D(PaletteTextureSampler, float2(tileIndex, 0.5));
 
     return paletteColor * Lighting;
 }

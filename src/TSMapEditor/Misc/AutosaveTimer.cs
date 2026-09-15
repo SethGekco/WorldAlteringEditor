@@ -21,13 +21,21 @@ public class AutosaveTimer
     private const string AutoSavesDirectory = "AutoSaves";
     private const string MapFileExtension = ".map";
 
+    // stride-2048 fork: anchor auto-saves on the application directory rather than the process
+    // executable. When the editor is launched as "dotnet WorldAlteringEditor.dll" (the Linux build),
+    // Environment.ProcessPath is the dotnet host (e.g. /usr/bin/dotnet), which made auto-saves
+    // target a non-writable system directory and fail.
+    private static string GetAutoSavesDirectoryPath() => Path.Combine(AppContext.BaseDirectory, AutoSavesDirectory);
+
     public TimeSpan AutoSaveTime { get; set; }
 
     private void DoSave()
     {
         var now = DateTime.Now;
         string timestamp = $"{now.Year}_{now.Month:D2}_{now.Day:D2}_{now.Hour:D2}_{now.Minute:D2}_{now.Second:D2}";
-        map.AutoSave(Path.Combine(Path.GetDirectoryName(Environment.ProcessPath), AutoSavesDirectory, $"autosave_{timestamp}{MapFileExtension}"));
+        string directoryPath = GetAutoSavesDirectoryPath();
+        Directory.CreateDirectory(directoryPath);
+        map.AutoSave(Path.Combine(directoryPath, $"autosave_{timestamp}{MapFileExtension}"));
     }
 
     public string Update(TimeSpan elapsedTime)
@@ -67,7 +75,7 @@ public class AutosaveTimer
     {
         Logger.Log("Purging old auto-saves.");
 
-        string path = Path.Combine(Path.GetDirectoryName(Environment.ProcessPath), AutoSavesDirectory);
+        string path = GetAutoSavesDirectoryPath();
 
         if (!Directory.Exists(path))
         {

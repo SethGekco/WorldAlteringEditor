@@ -89,7 +89,10 @@ public class INItializableWindow : EditorWindow
 
         _initialized = true;
 
+        // stride-2048 fork / DesktopGL: WindowSizeChangedByUser is a Windows-only XNAUI (WindowsDX) event.
+#if WINDOWS
         WindowManager.WindowSizeChangedByUser += WindowManager_WindowSizeChangedByUser;
+#endif
     }
 
     private void WindowManager_WindowSizeChangedByUser(object sender, EventArgs e)
@@ -99,7 +102,9 @@ public class INItializableWindow : EditorWindow
 
     public override void Kill()
     {
+#if WINDOWS
         WindowManager.WindowSizeChangedByUser -= WindowManager_WindowSizeChangedByUser;
+#endif
         base.Kill();
     }
 

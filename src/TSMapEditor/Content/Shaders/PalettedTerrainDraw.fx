@@ -76,8 +76,16 @@ PixelShaderOutput MainPS(VertexShaderOutput input)
     // otherwise the output will be black!
     float4 tex = MainTexture.Sample(MainSampler, input.TextureCoordinates);
 
+    // stride-2048 fork / DesktopGL: SurfaceFormat.Alpha8 maps to a single-channel (red) texture on
+    // OpenGL, so a paletted tile's index/alpha is sampled in .r rather than .a.
+#if OPENGL
+    float tileIndex = tex.r;
+#else
+    float tileIndex = tex.a;
+#endif
+
     // Discard transparent areas
-    clip(tex.a == 0.0f ? -1 : 1);
+    clip(tileIndex == 0.0f ? -1 : 1);
 
     // Abuse alpha component of color to determine whether we should render with a palette or not
     if (input.Color.a >= 1.0f)
@@ -87,7 +95,7 @@ PixelShaderOutput MainPS(VertexShaderOutput input)
     else
     {
         // Get color from palette
-        float4 paletteColor = PaletteTexture.Sample(PaletteSampler, float2(tex.a, 0.5));
+        float4 paletteColor = PaletteTexture.Sample(PaletteSampler, float2(tileIndex, 0.5));
 
         // Multiply the color by 2. This is done because unlike map lighting which can exceed 1.0 and go up to 2.0,
         // the color values passed in the pixel shader input are capped at 1.0.

@@ -169,7 +169,10 @@ public class CheckDistancePathfindingCursorAction : CursorAction
 
     public void BuildPathfindingCache()
     {
-        const int MaxMapCoord = 512;
+        // stride-2048 fork: size the caches to the actual map's coordinate extent
+        // (max cell coordinate ~= width + height) rather than a fixed 512, capped at
+        // the cell buffer. Avoids allocating/iterating the full 2048+ grid for small maps.
+        int MaxMapCoord = Math.Min(MapEditorLibrary.Models.Map.TileBufferSize, Map.Size.X + Map.Size.Y + 2);
 
         landPathfindingCache = new byte[MaxMapCoord][];
         navalPathfindingCache = new byte[MaxMapCoord][];

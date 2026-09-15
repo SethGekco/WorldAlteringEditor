@@ -115,6 +115,11 @@ public class PlaceTerrainTileMutation : Mutation, ICheckableMutation
                 {
                     AddCellToUndoData(mapTile.CoordsToPoint());
                     mapTile.ChangeTileIndex(Tile.TileID, (byte)i);
+
+                    // stride-2048 fork: keep the exact graphical variant the user picked in the tile
+                    // display (editor-side visual only; the game randomizes variants by cell position).
+                    if (Tile is MapEditorLibrary.Graphics.MGTileImage mgTileImage)
+                        mapTile.TileImage = mgTileImage;
                     mapTile.Level = (byte)Math.Min(originLevel + Tile.GetSubTile(i).TmpImage.Height, Constants.MaxMapHeightLevel);
                     RefreshCellLighting(mapTile);
                 }

@@ -345,7 +345,7 @@ public class OverlayFrameSelector : EditorWindow
             if (frame.Texture == null)
                 continue;
 
-            palettedDrawEffect.Parameters["PaletteTexture"].SetValue(currentOverlayShape.GetPaletteTexture());
+            palettedDrawEffect.FindTextureParameter("PaletteTexture").SetValue(currentOverlayShape.GetPaletteTexture());
             palettedDrawEffect.Parameters["Lighting"].SetValue(Vector4.One);
 
             DrawTexture(frame.Texture.Texture, frame.Texture.SourceRectangle, new Rectangle(frame.Location.X + frame.Offset.X,

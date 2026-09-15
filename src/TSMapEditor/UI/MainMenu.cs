@@ -14,7 +14,9 @@ using Microsoft.Xna.Framework.Graphics;
 
 
 #if WINDOWS
+#if WINDOWS
 using System.Windows.Forms;
+#endif
 using Microsoft.Win32;
 #endif
 
@@ -352,6 +354,8 @@ public class MainMenu : EditorWindow
             return;
         }
 
+        // stride-2048 fork / DesktopGL: the Windows registry is only available on Windows.
+#if WINDOWS
         try
         {
             foreach (string registryInstallPath in pathsToLookup)
@@ -411,6 +415,9 @@ public class MainMenu : EditorWindow
             tbGameDirectory.Text = string.Empty;
             Logger.Log("Failed to read game installation path from the Windows registry! Exception message: " + ex.Message);
         }
+#else
+        Logger.Log("Reading the game installation path from the registry is only supported on Windows; set the game directory manually.");
+#endif
     }
 
     private void TbGameDirectory_TextChanged(object sender, EventArgs e)
@@ -493,6 +500,15 @@ public class MainMenu : EditorWindow
                 InputIgnoreTime = TimeSpan.FromSeconds(Constants.UIAccidentalClickPreventionTime);
             }
         }
+#else
+        // stride-2048 fork / DesktopGL: use a native folder picker (kdialog/zenity) for the game dir.
+        string selectedDir = NativeFileDialog.SelectFolder(
+            Translate(this, "BrowseGameDirectory", "Select the game directory"), tbGameDirectory.Text);
+        if (selectedDir != null)
+        {
+            tbGameDirectory.Text = selectedDir;
+            InputIgnoreTime = TimeSpan.FromSeconds(Constants.UIAccidentalClickPreventionTime);
+        }
 #endif
     }
 
@@ -511,6 +527,18 @@ public class MainMenu : EditorWindow
                 InputIgnoreTime = TimeSpan.FromSeconds(Constants.UIAccidentalClickPreventionTime);
                 BtnLoad_LeftClick(this, new EventArgs());
             }
+        }
+#else
+        // stride-2048 fork / DesktopGL: use a native file picker (kdialog/zenity) for the map file.
+        string selectedMap = NativeFileDialog.OpenFile(
+            Translate(this, "BrowseMapFile", "Select a map file"),
+            string.IsNullOrWhiteSpace(tbMapPath.Text) ? tbGameDirectory.Text : tbMapPath.Text,
+            "*.map *.mpr *.yrm", "Map files");
+        if (selectedMap != null)
+        {
+            tbMapPath.Text = selectedMap;
+            InputIgnoreTime = TimeSpan.FromSeconds(Constants.UIAccidentalClickPreventionTime);
+            BtnLoad_LeftClick(this, new EventArgs());
         }
 #endif
     }

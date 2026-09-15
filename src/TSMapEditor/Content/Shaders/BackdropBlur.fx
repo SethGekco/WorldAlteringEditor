@@ -117,9 +117,16 @@ float4 GlassMaterialPS(VertexShaderOutput input) : COLOR
 
     // A faint top-left bevel helps sell the thickness of the glass without
     // competing with the window's regular border.
+    // stride-2048 fork / DesktopGL: reading the screen-space pixel position (SV_POSITION) as a
+    // pixel-shader input is illegal on the OpenGL ps_3_0 profile (it would require VPOS). The bevel
+    // is a subtle cosmetic touch, so it is omitted on the OpenGL build.
+#if OPENGL
+    float edgeReflection = 0.0;
+#else
     float topEdge = 1.0 - saturate(input.Position.y / 4.0);
     float leftEdge = 1.0 - saturate(input.Position.x / 4.0);
     float edgeReflection = max(topEdge, leftEdge) * 0.30;
+#endif
 
     float reflection = wideReflection + narrowReflection + narrowReflection2 + edgeReflection;
     materialColor += ReflectionColor.rgb * reflection * ReflectionIntensity;

@@ -1,7 +1,11 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <TargetFramework>net8.0-windows</TargetFramework>
+    <!-- stride-2048 fork: dual-platform build (WindowsDX on Windows, DesktopGL elsewhere).
+         See TSMapEditor.csproj for details. -->
+    <IsWindowsBuild>$([MSBuild]::IsOSPlatform('Windows'))</IsWindowsBuild>
+    <TargetFramework Condition="'$(IsWindowsBuild)' == 'true'">net8.0-windows</TargetFramework>
+    <TargetFramework Condition="'$(IsWindowsBuild)' != 'true'">net8.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>disable</Nullable>
     <Title>World-Altering Editor MCP Server Library</Title>
@@ -24,8 +28,10 @@
   <ItemGroup>
     <PackageReference Include="Microsoft.Extensions.DependencyInjection" Version="10.0.10" />
     <PackageReference Include="ModelContextProtocol" Version="2.1.0" />
-    <PackageReference Include="MonoGame.Framework.WindowsDX" Version="3.8.3" />
-    <PackageReference Include="Rampastring.XNAUI.WindowsDX" Version="3.2.0" />
+    <PackageReference Include="MonoGame.Framework.WindowsDX" Version="3.8.3" Condition="'$(IsWindowsBuild)' == 'true'" />
+    <PackageReference Include="MonoGame.Framework.DesktopGL" Version="3.8.1.303" Condition="'$(IsWindowsBuild)' != 'true'" />
+    <PackageReference Include="Rampastring.XNAUI.WindowsDX" Version="3.2.0" Condition="'$(IsWindowsBuild)' == 'true'" />
+    <PackageReference Include="Rampastring.XNAUI.UniversalGL" Version="3.2.0" Condition="'$(IsWindowsBuild)' != 'true'" />
   </ItemGroup>
 
   <ItemGroup>

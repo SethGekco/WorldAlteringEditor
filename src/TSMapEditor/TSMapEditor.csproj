@@ -1,12 +1,21 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
-    <TargetFramework>net8.0-windows</TargetFramework>
-    <OutputType>WinExe</OutputType>
+    <!-- stride-2048 fork: dual-platform build. Building on Windows produces the upstream
+         net8.0-windows + MonoGame WindowsDX + WinForms editor; building elsewhere produces the
+         net8.0 + MonoGame DesktopGL (OpenGL) editor. All Windows-only code is guarded with
+         "#if WINDOWS" (auto-defined by the -windows target framework). -->
+    <IsWindowsBuild>$([MSBuild]::IsOSPlatform('Windows'))</IsWindowsBuild>
+    <TargetFramework Condition="'$(IsWindowsBuild)' == 'true'">net8.0-windows</TargetFramework>
+    <TargetFramework Condition="'$(IsWindowsBuild)' != 'true'">net8.0</TargetFramework>
+    <OutputType Condition="'$(IsWindowsBuild)' == 'true'">WinExe</OutputType>
+    <OutputType Condition="'$(IsWindowsBuild)' != 'true'">Exe</OutputType>
+    <UseWindowsForms Condition="'$(IsWindowsBuild)' == 'true'">true</UseWindowsForms>
+    <ImportWindowsDesktopTargets Condition="'$(IsWindowsBuild)' == 'true'">true</ImportWindowsDesktopTargets>
+    <MonoGamePlatform Condition="'$(IsWindowsBuild)' == 'true'">Windows</MonoGamePlatform>
+    <MonoGamePlatform Condition="'$(IsWindowsBuild)' != 'true'">DesktopGL</MonoGamePlatform>
     <AssemblyName>WorldAlteringEditor</AssemblyName>
     <Deterministic>false</Deterministic>
     <GenerateAssemblyInfo>false</GenerateAssemblyInfo>
-    <UseWindowsForms>true</UseWindowsForms>
-    <ImportWindowsDesktopTargets>true</ImportWindowsDesktopTargets>
     <SatelliteResourceLanguages>en</SatelliteResourceLanguages>
   </PropertyGroup>
   <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Debug|AnyCPU' ">
@@ -19,12 +28,16 @@
   <PropertyGroup>
     <StartupObject />
   </PropertyGroup>
-  <PropertyGroup>
+  <!-- Windows-only packaging metadata; inert on the Linux/DesktopGL build. -->
+  <PropertyGroup Condition="$([MSBuild]::IsOSPlatform('Windows'))">
     <ApplicationManifest>app.manifest</ApplicationManifest>
-  </PropertyGroup>
-  <PropertyGroup>
     <ApplicationIcon>editoricon.ico</ApplicationIcon>
   </PropertyGroup>
+  <!-- stride-2048 fork / DesktopGL: the auto-generated WinForms app-settings class is unused and
+       depends on System.Configuration.ApplicationSettingsBase (provided only via WinForms). -->
+  <ItemGroup Condition="!$([MSBuild]::IsOSPlatform('Windows'))">
+    <Compile Remove="Properties/Settings.Designer.cs" />
+  </ItemGroup>
   <ItemGroup>
     <Compile Remove="Config\Scripts\Activate Assign Mission Cursor Action.cs" />
     <Compile Remove="Config\Scripts\Add Map Reveal Trigger.cs" />
@@ -495,10 +508,16 @@
   <ItemGroup>
     <PackageReference Include="ImeSharp" Version="1.4.1" />
     <PackageReference Include="Microsoft.CSharp" Version="4.7.0" />
-    <PackageReference Include="MonoGame.Framework.WindowsDX" Version="3.8.3" />
+    <!-- stride-2048 fork: WindowsDX packages on Windows (upstream versions); DesktopGL elsewhere.
+         DesktopGL is pinned to 3.8.1.303 because Rampastring.XNAUI.UniversalGL 3.2.0 was built
+         against it; 3.8.3 throws MissingMethodException (Game.add_Exiting) at startup. -->
+    <PackageReference Include="MonoGame.Framework.WindowsDX" Version="3.8.3" Condition="'$(IsWindowsBuild)' == 'true'" />
+    <PackageReference Include="MonoGame.Framework.DesktopGL" Version="3.8.1.303" Condition="'$(IsWindowsBuild)' != 'true'" />
     <PackageReference Include="Rampastring.Tools" Version="2.0.7" />
-    <PackageReference Include="MonoGame.Content.Builder.Task" Version="3.8.3" />
-    <PackageReference Include="Rampastring.XNAUI.WindowsDX" Version="3.2.0" />
+    <PackageReference Include="MonoGame.Content.Builder.Task" Version="3.8.3" Condition="'$(IsWindowsBuild)' == 'true'" />
+    <PackageReference Include="MonoGame.Content.Builder.Task" Version="3.8.1.303" Condition="'$(IsWindowsBuild)' != 'true'" />
+    <PackageReference Include="Rampastring.XNAUI.WindowsDX" Version="3.2.0" Condition="'$(IsWindowsBuild)' == 'true'" />
+    <PackageReference Include="Rampastring.XNAUI.UniversalGL" Version="3.2.0" Condition="'$(IsWindowsBuild)' != 'true'" />
     <PackageReference Include="SixLabors.ImageSharp" Version="2.1.11" />
     <PackageReference Include="TextCopy" Version="6.2.1" />
     <PackageReference Include="Westwind.Scripting" Version="1.3.3" />

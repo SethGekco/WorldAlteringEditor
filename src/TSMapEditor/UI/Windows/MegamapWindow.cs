@@ -35,7 +35,7 @@ public class MegamapWindow : EditorWindow
         EnableDropShadow = enableToolbar;
         MegamapTexture = cursorActionTarget.MinimapTexture;
 
-        double ratio = MegamapTexture.Width / (double)MegamapTexture.Height;
+        double ratio = WorldWidth / (double)WorldHeight;
         if (ratio > 2.0)
         {
             Width = 300;
@@ -78,6 +78,13 @@ public class MegamapWindow : EditorWindow
     }
 
     private readonly ICursorActionTarget cursorActionTarget;
+
+    // stride-2048 fork: the minimap texture used to always cover the whole map, so this window used
+    // texture dimensions as world dimensions. With camera-follow render targets (oversized maps) the
+    // texture no longer represents the whole map, so navigation and the camera rectangle are mapped
+    // through the map's world pixel dimensions instead (identical values for whole-map targets).
+    private int WorldWidth => cursorActionTarget.Map.WidthInPixels;
+    private int WorldHeight => cursorActionTarget.Map.HeightInPixelsWithCellHeight;
     private readonly bool enableToolbar;
 
     private Texture2D _megamapTexture;
@@ -118,12 +125,12 @@ public class MegamapWindow : EditorWindow
             previewHeight = Height;
         }
 
-        float xRatio = Width / (float)MegamapTexture.Width;
-        float yRatio = previewHeight / (float)MegamapTexture.Height;
+        float xRatio = Width / (float)WorldWidth;
+        float yRatio = previewHeight / (float)WorldHeight;
         float drawRatio = Math.Min(xRatio, yRatio);
 
-        int drawWidth = (int)(MegamapTexture.Width * drawRatio);
-        int drawHeight = (int)(MegamapTexture.Height * drawRatio);
+        int drawWidth = (int)(WorldWidth * drawRatio);
+        int drawHeight = (int)(WorldHeight * drawRatio);
 
         textureDrawRectangle = new Rectangle((Width - drawWidth) / 2, startY + (previewHeight - drawHeight) / 2, drawWidth, drawHeight);
     }
@@ -182,7 +189,7 @@ public class MegamapWindow : EditorWindow
         int increaseX;
         int increaseY;
 
-        double ratio = MegamapTexture.Width / (double)MegamapTexture.Height;
+        double ratio = WorldWidth / (double)WorldHeight;
         if (ratio > Constants.CellSizeX / Constants.CellSizeY)
         {
             increaseX = amount;
@@ -218,11 +225,11 @@ public class MegamapWindow : EditorWindow
 
         double x = cursorPoint.X - textureDrawRectangle.X;
         x /= textureDrawRectangle.Width;
-        x *= MegamapTexture.Width;
+        x *= WorldWidth;
 
         double y = cursorPoint.Y - textureDrawRectangle.Y;
         y /= textureDrawRectangle.Height;
-        y *= MegamapTexture.Height;
+        y *= WorldHeight;
 
         MegamapClicked?.Invoke(this, new MegamapClickedEventArgs(new Point2D((int)x, (int)y)));
     }
@@ -269,16 +276,21 @@ public class MegamapWindow : EditorWindow
     {
         DrawWindowBackground();
 
-        Renderer.PushSettings(new SpriteBatchSettings(SpriteSortMode.Deferred, BlendState.AlphaBlend, SamplerState.LinearWrap, null, null, null));
-        DrawTexture(MegamapTexture, textureDrawRectangle, Color.White);
-        Renderer.PopSettings();
+        // stride-2048 fork: only draw the minimap texture when it actually covers the whole map
+        // (with camera-follow render targets it does not; navigation still works via world coords).
+        if (MegamapTexture.Width == WorldWidth && MegamapTexture.Height == WorldHeight)
+        {
+            Renderer.PushSettings(new SpriteBatchSettings(SpriteSortMode.Deferred, BlendState.AlphaBlend, SamplerState.LinearWrap, null, null, null));
+            DrawTexture(MegamapTexture, textureDrawRectangle, Color.White);
+            Renderer.PopSettings();
+        }
 
         if (CameraRectangle.Width > 0 && CameraRectangle.Height > 0)
         {
-            double xPos = (CameraRectangle.X / (double)MegamapTexture.Width) * textureDrawRectangle.Width;
-            double yPos = (CameraRectangle.Y / (double)MegamapTexture.Height) * textureDrawRectangle.Height;
-            double width = (CameraRectangle.Width / (double)MegamapTexture.Width) * textureDrawRectangle.Width;
-            double height = (CameraRectangle.Height / (double)MegamapTexture.Height) * textureDrawRectangle.Height;
+            double xPos = (CameraRectangle.X / (double)WorldWidth) * textureDrawRectangle.Width;
+            double yPos = (CameraRectangle.Y / (double)WorldHeight) * textureDrawRectangle.Height;
+            double width = (CameraRectangle.Width / (double)WorldWidth) * textureDrawRectangle.Width;
+            double height = (CameraRectangle.Height / (double)WorldHeight) * textureDrawRectangle.Height;
 
             DrawRectangle(new Rectangle(textureDrawRectangle.X + (int)xPos, textureDrawRectangle.Y + (int)yPos, (int)width, (int)height), Color.White, 1);
         }

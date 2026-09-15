@@ -15,13 +15,24 @@ public class Format5
         {
             byte* r = pr, w = pw;
             byte* w_end = w + dest.Length;
+            byte* r_end = pr + src.Length;
 
             while (w < w_end)
             {
+                // stride-2048 fork: also bound the read cursor. When the destination buffer is larger
+                // than the encoded data (e.g. a vanilla 512-stride overlay pack decoded into an
+                // extended-stride buffer), the loop previously ran past the end of the source array
+                // and read undefined memory as block headers.
+                if (r + 4 > r_end)
+                    break;
+
                 ushort size_in = *(ushort*)r;
                 r += 2;
                 uint size_out = *(ushort*)r;
                 r += 2;
+
+                if (r + size_in > r_end)
+                    break;
 
                 if (size_in == 0 || size_out == 0)
                     break;

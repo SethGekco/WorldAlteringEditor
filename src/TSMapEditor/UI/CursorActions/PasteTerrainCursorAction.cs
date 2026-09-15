@@ -83,7 +83,7 @@ public class PasteTerrainCursorAction : CursorAction
 
         originLevelOffset = 0;
 
-        if (!System.Windows.Forms.Clipboard.ContainsData(Constants.ClipboardMapDataFormatValue))
+        if (!MapEditorLibrary.Misc.CrossPlatformClipboard.ContainsData(Constants.ClipboardMapDataFormatValue))
         {
             Logger.Log(nameof(PasteTerrainCursorAction) + ": invalid clipboard data format, exiting action");
             ExitAction();
@@ -92,7 +92,7 @@ public class PasteTerrainCursorAction : CursorAction
 
         byte[] data;
 
-        object clipboardContents = System.Windows.Forms.Clipboard.GetData(Constants.ClipboardMapDataFormatValue);
+        object clipboardContents = MapEditorLibrary.Misc.CrossPlatformClipboard.GetData(Constants.ClipboardMapDataFormatValue);
         if (clipboardContents == null)
         {
             Logger.Log($"WARNING: {nameof(PasteTerrainCursorAction)}: Clipboard data is null");

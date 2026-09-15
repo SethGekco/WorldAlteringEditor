@@ -238,7 +238,7 @@ public class MapUI : XNAControl, ICursorActionTarget, IMutationTarget, IMapScree
                 }
             }
 #else
-            mapUI.ExtractMegamapTo(e, Path.Combine(Environment.CurrentDirectory, "megamap.png"));
+            mapView.ExtractMegamapTo(e, Path.Combine(Environment.CurrentDirectory, "megamap.png"));
 #endif
         }
     }

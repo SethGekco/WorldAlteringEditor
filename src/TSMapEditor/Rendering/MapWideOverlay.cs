@@ -5,7 +5,9 @@ using System.IO;
 using TSMapEditor.Settings;
 
 #if WINDOWS
+#if WINDOWS
 using System.Windows.Forms;
+#endif
 #endif
 
 namespace TSMapEditor.Rendering;

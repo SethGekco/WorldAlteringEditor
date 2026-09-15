@@ -114,6 +114,6 @@ public abstract class CopyTerrainCursorActionBase : CursorAction
             }
         }
 
-        System.Windows.Forms.Clipboard.SetData(Constants.ClipboardMapDataFormatValue, copiedMapData.Serialize());
+        MapEditorLibrary.Misc.CrossPlatformClipboard.SetData(Constants.ClipboardMapDataFormatValue, copiedMapData.Serialize());
     }
 }

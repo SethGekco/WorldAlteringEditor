@@ -107,6 +107,32 @@ public static class MapWriter
         WriteBase64ToSection(finalData, section);
     }
 
+    /// <summary>
+    /// stride-2048 fork: writes (or removes) the per-map [MapSizeExt] tag section shared with the
+    /// MapSizeExt game DLL. Vanilla-sized maps get no section so they stay byte-compatible with the
+    /// unmodified game. Oversized maps get RequiredStride= (the OverlayPack stride used by this
+    /// file); maps whose width + height exceeds the vanilla base-1000 coordinate packing also get
+    /// CoordBase= (next power of two >= width + height).
+    /// </summary>
+    public static void WriteMapSizeExtSection(IMap map, IniFile mapIni)
+    {
+        mapIni.RemoveSection(Constants.MapSizeExtSectionName);
+
+        int overlayPackStride = Constants.GetOverlayPackStride(map.Size.X, map.Size.Y);
+        int coordBase = Constants.GetCellCoordBaseForMapSize(map.Size.X, map.Size.Y);
+
+        if (overlayPackStride == Constants.VANILLA_MAP_LENGTH_IN_DIMENSION &&
+            coordBase == Constants.VANILLA_CELL_COORD_BASE)
+        {
+            return;
+        }
+
+        mapIni.SetIntValue(Constants.MapSizeExtSectionName, Constants.MapSizeExtRequiredStrideKey, overlayPackStride);
+
+        if (coordBase != Constants.VANILLA_CELL_COORD_BASE)
+            mapIni.SetIntValue(Constants.MapSizeExtSectionName, Constants.MapSizeExtCoordBaseKey, coordBase);
+    }
+
     public static void WriteOverlays(IMap map, IniFile mapIni)
     {
         const string overlayPackSectionName = "OverlayPack";
@@ -117,18 +143,27 @@ public static class MapWriter
 
         bool needsExtendedOverlayPack = map.Basic.NewINIFormat >= 5;
 
-        var overlayArray = new byte[Constants.MAX_MAP_LENGTH_IN_DIMENSION * Constants.MAX_MAP_LENGTH_IN_DIMENSION * (needsExtendedOverlayPack ? 2 : 1)];
+        // stride-2048 fork: write the overlay pack at the stride matching the map's size so vanilla
+        // maps stay byte-compatible with the unmodified game (see Constants.GetOverlayPackStride).
+        int overlayPackStride = Constants.GetOverlayPackStride(map.Size.X, map.Size.Y);
+
+        var overlayArray = new byte[overlayPackStride * overlayPackStride * (needsExtendedOverlayPack ? 2 : 1)];
         for (int i = 0; i < overlayArray.Length; i++)
             overlayArray[i] = 0xFF; // fill the entire array with 0xFF, which will be (sbyte)-1 or (short)-1, regardless of what format we're writing in
 
-        var overlayDataArray = new byte[Constants.MAX_MAP_LENGTH_IN_DIMENSION * Constants.MAX_MAP_LENGTH_IN_DIMENSION];
+        var overlayDataArray = new byte[overlayPackStride * overlayPackStride];
 
         map.DoForAllValidTiles(tile =>
         {
             if (tile.Overlay == null || tile.Overlay.OverlayType == null)
                 return;
 
-            int dataIndex = (tile.Y * Constants.MAX_MAP_LENGTH_IN_DIMENSION) + tile.X;
+            int dataIndex = (tile.Y * overlayPackStride) + tile.X;
+
+            // Safety guard for cells whose packed index would fall outside the pack (only possible
+            // at the absolute maximum map size).
+            if (dataIndex >= overlayPackStride * overlayPackStride)
+                return;
 
             if (needsExtendedOverlayPack)
                 BinaryPrimitives.WriteUInt16LittleEndian(new Span<byte>(overlayArray, dataIndex * 2, 2), (ushort)tile.Overlay.OverlayType.Index);
@@ -192,7 +227,7 @@ public static class MapWriter
             if (tile.TerrainObject == null)
                 return;
 
-            int tileIndex = tile.Y * 1000 + tile.X;
+            int tileIndex = tile.Y * Constants.CellCoordBase + tile.X;
             section.SetStringValue(tileIndex.ToString(), tile.TerrainObject.TerrainType.ININame);
         });
     }
@@ -279,7 +314,7 @@ public static class MapWriter
 
         foreach (var cellTag in map.CellTags)
         {
-            int tileIndex = cellTag.Position.Y * 1000 + cellTag.Position.X;
+            int tileIndex = cellTag.Position.Y * Constants.CellCoordBase + cellTag.Position.X;
             section.SetStringValue(tileIndex.ToString(), cellTag.Tag.ID);
         }
     }

@@ -3,7 +3,6 @@ using MapEditorLibrary.Misc;
 using MapEditorLibrary.Models.Enums;
 using Microsoft.Xna.Framework;
 using Rampastring.Tools;
-using System.Windows.Forms;
 
 namespace MapEditorLibrary.Models;
 
@@ -332,7 +331,7 @@ public class Trigger : IIDContainer
         tag.Serialize(memoryStream);
 
         bytes = memoryStream.ToArray();
-        Clipboard.SetData(Constants.ClipboardTriggerFormatValue, bytes);
+        CrossPlatformClipboard.SetData(Constants.ClipboardTriggerFormatValue, bytes);
     }
 
     public static (Trigger, Tag) GetTriggerAndTagFromClipboard(Map map)
@@ -340,7 +339,7 @@ public class Trigger : IIDContainer
         if (!HasTriggerInClipboard())
             return (null, null);
 
-        var bytes = (byte[])Clipboard.GetData(Constants.ClipboardTriggerFormatValue);
+        var bytes = (byte[])CrossPlatformClipboard.GetData(Constants.ClipboardTriggerFormatValue);
         using var memoryStream = new MemoryStream(bytes);
 
         var trigger = new Trigger(map.GetNewUniqueInternalId());
@@ -357,6 +356,6 @@ public class Trigger : IIDContainer
 
     public static bool HasTriggerInClipboard()
     {
-        return Clipboard.ContainsData(Constants.ClipboardTriggerFormatValue);
+        return CrossPlatformClipboard.ContainsData(Constants.ClipboardTriggerFormatValue);
     }
 }

@@ -47,7 +47,9 @@ public sealed class ScriptingChangedEventArgs : EventArgs
 public class Map : IMap
 {
     public const int MaxTubes = 127;
-    public const int TileBufferSize = 600; // for now
+    // stride-2048 fork: cell buffer must exceed the max cell coordinate
+    // (Constants.MAX_MAP_LENGTH_IN_DIMENSION) with padding. Was 600 (= 512 + 88).
+    public const int TileBufferSize = Constants.MAX_MAP_LENGTH_IN_DIMENSION + 88;
 
     public event EventHandler HousesChanged;
     public event EventHandler<HouseEventArgs> HouseColorChanged;
@@ -419,6 +421,11 @@ public class Map : IMap
         Basic.NewINIFormat = needsExtendedOverlayPack ? 5 : 4;
 
         LoadedINI.Comment = "Written by the World-Altering Editor (WAE)\r\n; all comments have been truncated\r\n; github.com/CnCNet/WorldAlteringEditor\r\n; if you wish to support the editor, you can subscribe at patreon.com/rampastring\r\n; or buy me a coffee at ko-fi.com/rampastring";
+
+        // stride-2048 fork: re-derive the packed-coordinate base from the current size (the map may
+        // have been resized in the editor) and write/remove the [MapSizeExt] tag section accordingly.
+        Constants.CellCoordBase = Constants.GetCellCoordBaseForMapSize(Size.X, Size.Y);
+        MapWriter.WriteMapSizeExtSection(this, LoadedINI);
 
         MapWriter.WriteMapSection(this, LoadedINI);
         MapWriter.WriteBasicSection(this, LoadedINI);

@@ -13,9 +13,13 @@
 // Can render objects in either paletted or RGBA mode,
 // and can also draw shadows.
 
-bool IsShadow;
-bool UsePalette;
-bool UseRemap;
+// stride-2048 fork / DesktopGL: these were 'bool' uniforms, but the OpenGL (ps_3_0) profile
+// rejects branching on boolean constant registers ("IF src0 must have replicate swizzle").
+// Using float uniforms compared against 0.5 produces a scalar replicate-swizzle condition that
+// compiles on both the DX and GL profiles. The C# side sets these as 1.0f / 0.0f.
+float IsShadow;
+float UsePalette;
+float UseRemap;
 
 Texture2D MainTexture;
 SamplerState MainSampler
@@ -79,22 +83,31 @@ PixelShaderOutput MainPS(VertexShaderOutput input)
     // otherwise the output will be black!
     float4 tex = MainTexture.Sample(MainSampler, input.TextureCoordinates);
 
-    // Discard transparent areas
-    clip(tex.a == 0.0f ? -1 : 1);
+    // stride-2048 fork / DesktopGL: SurfaceFormat.Alpha8 (paletted sprites) maps to a single-channel
+    // (red) texture on OpenGL, so the palette index is sampled in .r; non-paletted RGBA sprites keep
+    // their alpha in .a.
+#if OPENGL
+    float tileIndex = (UsePalette > 0.5f) ? tex.r : tex.a;
+#else
+    float tileIndex = tex.a;
+#endif
 
-    if (IsShadow)
+    // Discard transparent areas
+    clip(tileIndex == 0.0f ? -1 : 1);
+
+    if (IsShadow > 0.5f)
     {
         output.color = float4(0, 0, 0, 0.5);
     }
     else
     {
-        if (UsePalette)
+        if (UsePalette > 0.5f)
         {
             // Get color from palette
-            float4 paletteColor = PaletteTexture.Sample(PaletteSampler, float2(tex.a, 0.5));
+            float4 paletteColor = PaletteTexture.Sample(PaletteSampler, float2(tileIndex, 0.5));
 
             // We need to convert the grayscale into remap
-            if (UseRemap)
+            if (UseRemap > 0.5f)
             {
                 float brightness = max(paletteColor.r, max(paletteColor.g, paletteColor.b));
 

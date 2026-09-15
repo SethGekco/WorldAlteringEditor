@@ -30,28 +30,19 @@ public static class Helpers
 
     public static Point2D? CoordStringToPoint(string coordsString)
     {
+        // stride-2048 fork: packed cell coords are Y * base + X, where the base is 1000 for vanilla
+        // maps and a power of two from the [MapSizeExt] CoordBase= tag for oversized maps. The
+        // previous implementation sliced the last 3 decimal digits off the string, which only works
+        // for base 1000; numeric division gives identical results there and supports other bases.
         int coords = Conversions.IntFromString(coordsString, -1);
-        if (coords < 0 || coordsString.Length < 4)
+        if (coords < 0)
         {
             Logger.Log("CoordStringToPoint: invalid coord string " + coordsString);
             return null;
         }
 
-        string xCoordPart = coordsString.Substring(coordsString.Length - 3);
-        int x = Conversions.IntFromString(xCoordPart, -1);
-        if (x < 0)
-        {
-            Logger.Log("CoordStringToPoint: invalid X coord " + x);
-            return null;
-        }
-
-        string yCoordPart = coordsString.Substring(0, coordsString.Length - 3);
-        int y = Conversions.IntFromString(yCoordPart, -1);
-        if (y < 0)
-        {
-            Logger.Log("CoordStringToPoint: invalid Y coord " + y);
-            return null;
-        }
+        int x = coords % Constants.CellCoordBase;
+        int y = coords / Constants.CellCoordBase;
 
         return new Point2D(x, y);
     }
@@ -455,16 +446,17 @@ public static class Helpers
 
     public static string NormalizePath(string path)
     {
-        if (path.Contains("../") || path.Contains("..\\"))
-        {
-            return Path.GetFullPath(path)
-                .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)
-                .ToUpperInvariant();
-        }
+        string resolved = (path.Contains("../") || path.Contains("..\\"))
+            ? Path.GetFullPath(path)
+            : Path.GetFullPath(new Uri(path).LocalPath);
 
-        return Path.GetFullPath(new Uri(path).LocalPath)
-            .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)
-            .ToUpperInvariant();
+        resolved = resolved.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+
+        // stride-2048 fork / DesktopGL: on case-insensitive filesystems (Windows) the path is
+        // upper-cased so search directories compare/dedupe case-insensitively. On case-sensitive
+        // filesystems (Linux/macOS) upper-casing corrupts the real path and every game file fails to
+        // load, so preserve the original case there.
+        return OperatingSystem.IsWindows() ? resolved.ToUpperInvariant() : resolved;
     }
 
     public static Texture2D RenderTextureAsSmaller(Texture2D existingTexture, RenderTarget2D renderTarget, GraphicsDevice graphicsDevice)
