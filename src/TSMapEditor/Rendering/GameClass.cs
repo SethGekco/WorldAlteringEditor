@@ -32,7 +32,10 @@ public class GameClass : Microsoft.Xna.Framework.Game
     {
 #if !DEBUG
         AppDomain.CurrentDomain.UnhandledException += (s, e) => HandleUnhandledException((Exception)e.ExceptionObject);
+        // stride-2048 fork / DesktopGL: WinForms thread-exception hook is Windows-only.
+#if WINDOWS
         Application.ThreadException += (s, e) => HandleUnhandledException(e.Exception);
+#endif
 #endif
         Program.DisableExceptionHandler();
 
