@@ -17,30 +17,113 @@ public class IniFileEx: IniFile
 
     public IniFileEx() : base() { }
 
-    public IniFileEx(string fileName) : base(fileName) { }
+    public IniFileEx(string fileName) : base(SanitizeFileOrEmpty(fileName))
+    {
+        FileName = fileName;
+    }
 
-    public IniFileEx(string filePath, CCFileManager ccFileManager) : base(filePath)
+    public IniFileEx(string filePath, CCFileManager ccFileManager) : base(SanitizeFileOrEmpty(filePath))
+    {
+        FileName = filePath;
+        Include(ccFileManager);
+        Inherit();
+    }
+
+    public IniFileEx(string filePath, Encoding encoding, CCFileManager ccFileManager) : base(SanitizeFileOrEmpty(filePath), encoding)
+    {
+        FileName = filePath;
+        Include(ccFileManager);
+        Inherit();
+    }
+
+    public IniFileEx(Stream stream, CCFileManager ccFileManager) : base(SanitizeStream(stream))
     {
         Include(ccFileManager);
         Inherit();
     }
 
-    public IniFileEx(string filePath, Encoding encoding, CCFileManager ccFileManager) : base(filePath, encoding)
+    public IniFileEx(Stream stream, Encoding encoding, CCFileManager ccFileManager) : base(SanitizeStream(stream), encoding)
     {
         Include(ccFileManager);
         Inherit();
     }
 
-    public IniFileEx(Stream stream, CCFileManager ccFileManager) : base(stream)
+    // stride-2048 fork: the game's own INI parser tolerates malformed lines (seen in the
+    // wild: a section header missing its closing bracket, "[Host.Types=GGI"), but
+    // Rampastring.Tools throws an IniParseException and the editor dies before showing
+    // anything. Comment such lines out before parsing, with a logged warning, so the
+    // editor is at least as lenient as the game. The source file is never modified.
+    private static MemoryStream SanitizeFileOrEmpty(string filePath)
     {
-        Include(ccFileManager);
-        Inherit();
+        // Preserve Rampastring's missing-file semantics (empty INI, no exception).
+        if (string.IsNullOrEmpty(filePath) || !File.Exists(filePath))
+            return new MemoryStream();
+
+        return SanitizeIniBytes(File.ReadAllBytes(filePath), filePath);
     }
 
-    public IniFileEx(Stream stream, Encoding encoding, CCFileManager ccFileManager) : base(stream, encoding)
+    private static MemoryStream SanitizeStream(Stream stream)
     {
-        Include(ccFileManager);
-        Inherit();
+        using var buffer = new MemoryStream();
+        stream.CopyTo(buffer);
+        return SanitizeIniBytes(buffer.ToArray(), "(stream)");
+    }
+
+    /// <summary>
+    /// Returns the INI contents with any section-header line that has no closing
+    /// bracket commented out. Works on raw bytes so the file's text encoding is
+    /// passed through untouched; if nothing is malformed, the input is returned as-is.
+    /// </summary>
+    private static MemoryStream SanitizeIniBytes(byte[] bytes, string sourceName)
+    {
+        MemoryStream output = null;
+        int pos = 0;
+        int copiedUpTo = 0;
+        int lineNumber = 0;
+
+        while (pos < bytes.Length)
+        {
+            lineNumber++;
+            int newline = Array.IndexOf(bytes, (byte)'\n', pos);
+            int lineEnd = newline < 0 ? bytes.Length : newline + 1;
+
+            int c = pos;
+            while (c < lineEnd && (bytes[c] == (byte)' ' || bytes[c] == (byte)'\t'))
+                c++;
+
+            if (c < lineEnd && bytes[c] == (byte)'[')
+            {
+                bool closed = false;
+                for (int i = c + 1; i < lineEnd; i++)
+                {
+                    if (bytes[i] == (byte)']')
+                    {
+                        closed = true;
+                        break;
+                    }
+                    if (bytes[i] == (byte)'\r')
+                        break;
+                }
+
+                if (!closed)
+                {
+                    output ??= new MemoryStream(bytes.Length + 16);
+                    output.Write(bytes, copiedUpTo, pos - copiedUpTo);
+                    output.WriteByte((byte)';');
+                    copiedUpTo = pos;
+                    Logger.Log($"IniFileEx: ignoring malformed INI line {lineNumber} in {sourceName} (section header has no closing bracket).");
+                }
+            }
+
+            pos = lineEnd;
+        }
+
+        if (output == null)
+            return new MemoryStream(bytes, 0, bytes.Length, writable: false);
+
+        output.Write(bytes, copiedUpTo, bytes.Length - copiedUpTo);
+        output.Position = 0;
+        return output;
     }
 
     /// <summary>
