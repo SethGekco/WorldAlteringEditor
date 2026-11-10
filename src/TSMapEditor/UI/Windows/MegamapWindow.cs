@@ -33,7 +33,7 @@ public class MegamapWindow : EditorWindow
         this.enableToolbar = enableToolbar;
         EnableGlassEffect = enableToolbar;
         EnableDropShadow = enableToolbar;
-        MegamapTexture = cursorActionTarget.MinimapTexture;
+        MegamapTexture = cursorActionTarget.MinimapDisplayTexture;
 
         double ratio = WorldWidth / (double)WorldHeight;
         if (ratio > 2.0)
@@ -276,9 +276,13 @@ public class MegamapWindow : EditorWindow
     {
         DrawWindowBackground();
 
-        // stride-2048 fork: only draw the minimap texture when it actually covers the whole map
-        // (with camera-follow render targets it does not; navigation still works via world coords).
-        if (MegamapTexture.Width == WorldWidth && MegamapTexture.Height == WorldHeight)
+        // stride-2048 fork: always fetch the current display texture. On whole-map-target maps it
+        // is the live minimap render target; on oversized (camera-follow) maps it is a radar-style
+        // whole-map texture built from tile radar colors. Both cover the entire world, so drawing
+        // scaled into the world-aspect rectangle is correct in both modes.
+        MegamapTexture = cursorActionTarget.MinimapDisplayTexture;
+
+        if (MegamapTexture != null)
         {
             Renderer.PushSettings(new SpriteBatchSettings(SpriteSortMode.Deferred, BlendState.AlphaBlend, SamplerState.LinearWrap, null, null, null));
             DrawTexture(MegamapTexture, textureDrawRectangle, Color.White);

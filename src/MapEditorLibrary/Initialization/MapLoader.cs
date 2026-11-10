@@ -9,6 +9,7 @@ using Microsoft.Xna.Framework;
 using Rampastring.Tools;
 using System.Buffers.Binary;
 using System.Globalization;
+using System.Linq;
 using System.Text;
 
 namespace MapEditorLibrary.Initialization;
@@ -26,10 +27,123 @@ public static class MapLoader
 
     public static List<string> MapLoadErrors = new List<string>();
 
+    // stride-2048 fork: cap the number of individually-listed errors so a corrupt map
+    // (e.g. tens of thousands of out-of-bounds terrain objects) cannot flood the error
+    // dialog and the error list. Every error is still written to the log file.
+    private const int MaxListedMapLoadErrors = 100;
+    public static int SuppressedMapLoadErrorCount = 0;
+
     private static void AddMapLoadError(string error)
     {
         Logger.Log(error);
-        MapLoadErrors.Add(error);
+
+        if (MapLoadErrors.Count < MaxListedMapLoadErrors)
+        {
+            MapLoadErrors.Add(error);
+        }
+        else
+        {
+            SuppressedMapLoadErrorCount++;
+        }
+    }
+
+    /// <summary>
+    /// stride-2048 fork: verifies the packed-cell-coordinate base against the map's own data.
+    /// Some external tools write oversized maps with vanilla base-1000 packed coordinates and
+    /// no [MapSizeExt] CoordBase= tag; decoding those with the size-derived base would scatter
+    /// terrain objects, cell tags and waypoints out of bounds. Mirrors the overlay stride
+    /// self-detection: measure which candidate base decodes the most coordinates into valid
+    /// cells and prefer it over the tag/heuristic, logging the decision.
+    /// </summary>
+    private static void DetectCellCoordBase(IMap map, IniFile mapIni)
+    {
+        const int maxSamples = 5000;
+        var packedCoords = new List<int>(maxSamples);
+
+        var terrainSection = mapIni.GetSection("Terrain");
+        if (terrainSection != null)
+        {
+            foreach (var kvp in terrainSection.Keys)
+            {
+                if (packedCoords.Count >= maxSamples)
+                    break;
+                if (int.TryParse(kvp.Key, NumberStyles.None, CultureInfo.InvariantCulture, out int packed))
+                    packedCoords.Add(packed);
+            }
+        }
+
+        var cellTagsSection = mapIni.GetSection("CellTags");
+        if (cellTagsSection != null)
+        {
+            foreach (var kvp in cellTagsSection.Keys)
+            {
+                if (packedCoords.Count >= maxSamples)
+                    break;
+                if (int.TryParse(kvp.Key, NumberStyles.None, CultureInfo.InvariantCulture, out int packed))
+                    packedCoords.Add(packed);
+            }
+        }
+
+        var waypointsSection = mapIni.GetSection("Waypoints");
+        if (waypointsSection != null)
+        {
+            foreach (var kvp in waypointsSection.Keys)
+            {
+                if (packedCoords.Count >= maxSamples)
+                    break;
+                if (int.TryParse(kvp.Value, NumberStyles.None, CultureInfo.InvariantCulture, out int packed))
+                    packedCoords.Add(packed);
+            }
+        }
+
+        // Too little data to measure anything meaningful.
+        if (packedCoords.Count < 10)
+            return;
+
+        int[] candidates = new int[]
+        {
+            Constants.CellCoordBase,
+            Constants.VANILLA_CELL_COORD_BASE,
+            Constants.GetCellCoordBaseForMapSize(map.Size.X, map.Size.Y)
+        };
+
+        int bestBase = Constants.CellCoordBase;
+        int bestScore = -1;
+        int currentScore = 0;
+
+        foreach (int candidate in candidates.Distinct())
+        {
+            int score = 0;
+            foreach (int packed in packedCoords)
+            {
+                if (map.IsCoordWithinMap(packed % candidate, packed / candidate))
+                    score++;
+            }
+
+            if (candidate == Constants.CellCoordBase)
+                currentScore = score;
+
+            if (score > bestScore)
+            {
+                bestScore = score;
+                bestBase = candidate;
+            }
+        }
+
+        if (bestBase != Constants.CellCoordBase && bestScore > currentScore)
+        {
+            AddMapLoadError(string.Format(Translate("MapLoader.CellCoordBaseMismatch",
+                "The map's packed cell coordinates appear to use base {0} instead of the expected base {1} " +
+                "({2} of {3} sampled coordinates valid vs. {4}). Loading with base {0}. " +
+                "Save the map with this editor to normalize it."),
+                bestBase, Constants.CellCoordBase, bestScore, packedCoords.Count, currentScore));
+            Constants.CellCoordBase = bestBase;
+        }
+        else
+        {
+            Logger.Log($"DetectCellCoordBase: keeping cell coordinate base {Constants.CellCoordBase} " +
+                $"({currentScore}/{packedCoords.Count} sampled coordinates valid).");
+        }
     }
 
     public static void PreCheckMapIni(IniFile mapIni)
@@ -136,6 +250,8 @@ public static class MapLoader
         // the [MapSizeExt] CoordBase= tag (trusted when present); otherwise derive it from the size.
         Constants.CellCoordBase = mapIni.GetIntValue(Constants.MapSizeExtSectionName,
             Constants.MapSizeExtCoordBaseKey, Constants.GetCellCoordBaseForMapSize(width, height));
+
+        DetectCellCoordBase(map, mapIni);
 
         string localSize = section.GetStringValue("LocalSize", null);
         if (localSize == null)

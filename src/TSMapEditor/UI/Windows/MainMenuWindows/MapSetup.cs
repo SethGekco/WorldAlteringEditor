@@ -44,6 +44,7 @@ public class MapSetup
     {
         LoadedMap = null;
         mapLoadErrors.Clear();
+        MapLoader.SuppressedMapLoadErrorCount = 0;
 
         FileManager = new()
         {
@@ -159,6 +160,14 @@ public class MapSetup
 
         var uiManager = new UIManager(windowManager, LoadedMap, theaterGraphics, editorGraphics);
         windowManager.AddAndInitializeControl(uiManager);
+
+        // stride-2048 fork: errors beyond the listing cap were counted, not listed - say so.
+        if (MapLoader.SuppressedMapLoadErrorCount > 0)
+        {
+            mapLoadErrors.Add(string.Format(Translate("MapSetup.SuppressedMapLoadErrors",
+                "...and {0} further errors. All errors have been written to MapEditorLog.log."),
+                MapLoader.SuppressedMapLoadErrorCount));
+        }
 
         const int margin = 60;
         string errorList = string.Join("\r\n\r\n", mapLoadErrors);

@@ -76,13 +76,22 @@ public class PlaceWaypointWindow : INItializableWindow
         if (waypointNumber < 0 || waypointNumber >= Constants.MaxWaypoint)
             return false;
 
-        if (map.Waypoints.Exists(w => w.Identifier == waypointNumber))
+        var existingWaypoint = map.Waypoints.Find(w => w.Identifier == waypointNumber);
+        if (existingWaypoint != null)
         {
-            EditorMessageBox.Show(WindowManager,
+            // stride-2048 fork: instead of a dead-end error, offer to move the existing waypoint here.
+            var messageBox = EditorMessageBox.Show(WindowManager,
                 Translate(this, "WaypointExists.Title", "Waypoint already exists"),
-                string.Format(Translate(this, "WaypointExists.Description",
-                    "A waypoint with the given number {0} already exists on the map!"), waypointNumber),
-                MessageBoxButtons.OK);
+                string.Format(Translate(this, "WaypointExists.MoveDescription",
+                    "Waypoint {0} already exists at {1}." + Environment.NewLine + Environment.NewLine +
+                    "Do you want to move it to {2}?"), waypointNumber, existingWaypoint.Position, cellCoords),
+                MessageBoxButtons.YesNo);
+
+            messageBox.YesClickedAction = _ =>
+            {
+                mutationManager.PerformMutation(new MoveWaypointMutation(mutationTarget, waypointNumber, cellCoords));
+                Hide();
+            };
 
             return false;
         }

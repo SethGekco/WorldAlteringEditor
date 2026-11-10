@@ -33,6 +33,13 @@ public interface IMapView
     LightingPreviewMode LightingPreviewState { get; }
     Camera Camera { get; }
     Texture2D MinimapTexture { get; }
+
+    /// <summary>
+    /// stride-2048 fork: the texture the minimap window should display. On maps rendered with
+    /// whole-map render targets this is <see cref="MinimapTexture"/>; on oversized (camera-follow)
+    /// maps it is a radar-style whole-map texture built from the tiles' radar colors.
+    /// </summary>
+    Texture2D MinimapDisplayTexture { get; }
     HashSet<object> MinimapUsers { get; }
 }
 
@@ -157,6 +164,91 @@ public class MapView : IMapView, IMapScreenCropper
 
     public Texture2D MinimapTexture => minimapRenderTarget.RenderTarget;
 
+    // stride-2048 fork: radar-style whole-map minimap for oversized (camera-follow) maps, built
+    // CPU-side from the tiles' radar colors (2 px per cell, like the in-game radar). Rebuilt
+    // lazily and throttled when the map has been edited.
+    private Texture2D radarTexture;
+    private bool radarTextureDirty = true;
+    private DateTime lastRadarTextureBuildTime = DateTime.MinValue;
+
+    public Texture2D MinimapDisplayTexture
+    {
+        get
+        {
+            if (!useCameraFollowRenderTargets)
+                return MinimapTexture;
+
+            if (radarTexture == null || (radarTextureDirty && (DateTime.UtcNow - lastRadarTextureBuildTime).TotalSeconds > 3.0))
+                BuildRadarTexture();
+
+            return radarTexture;
+        }
+    }
+
+    private void BuildRadarTexture()
+    {
+        var stopwatch = System.Diagnostics.Stopwatch.StartNew();
+
+        int cellPixelWidth = Constants.CellSizeX / 2;
+        int texWidth = Map.WidthInPixels / cellPixelWidth;
+        int texHeight = Map.HeightInPixelsWithCellHeight / Constants.CellSizeY;
+
+        var colors = new Color[texWidth * texHeight];
+
+        Map.DoForAllValidTiles(tile =>
+        {
+            if (tile.TileIndex >= TheaterGraphics.TileCount)
+                return;
+
+            var tileImage = TheaterGraphics.GetTile(tile.TileIndex);
+            if (tileImage == null || tile.SubTileIndex >= tileImage.SubTileCount)
+                return;
+
+            var subTile = tileImage.GetSubTile(tile.SubTileIndex);
+            if (subTile == null || subTile.TmpImage == null)
+                return;
+
+            Point2D topLeft = CellMath.CellTopLeftPointFromCellCoords_3D(tile.CoordsToPoint(), Map);
+            int column = topLeft.X / cellPixelWidth;
+            int row = topLeft.Y / Constants.CellSizeY;
+
+            if (row < 0 || row >= texHeight || column < 0 || column + 1 >= texWidth)
+                return;
+
+            if (tile.TerrainObject != null)
+            {
+                // Terrain objects (trees etc.) as dark green dots, like the in-game radar.
+                var treeColor = new Color(0, 82, 16);
+                colors[row * texWidth + column] = treeColor;
+                colors[row * texWidth + column + 1] = treeColor;
+            }
+            else if (tile.Overlay != null && tile.Overlay.OverlayType != null)
+            {
+                // Overlays (ore, walls etc.) as a golden-brown dot.
+                var overlayColor = new Color(180, 150, 60);
+                colors[row * texWidth + column] = overlayColor;
+                colors[row * texWidth + column + 1] = overlayColor;
+            }
+            else
+            {
+                colors[row * texWidth + column] = subTile.TmpImage.RadarLeftColor.ToXnaColor();
+                colors[row * texWidth + column + 1] = subTile.TmpImage.RadarRightColor.ToXnaColor();
+            }
+        });
+
+        if (radarTexture == null || radarTexture.Width != texWidth || radarTexture.Height != texHeight)
+        {
+            radarTexture?.Dispose();
+            radarTexture = new Texture2D(GraphicsDevice, texWidth, texHeight, false, SurfaceFormat.Color);
+        }
+
+        radarTexture.SetData(colors);
+        radarTextureDirty = false;
+        lastRadarTextureBuildTime = DateTime.UtcNow;
+
+        Logger.Log($"BuildRadarTexture: built {texWidth}x{texHeight} radar minimap in {stopwatch.ElapsedMilliseconds} ms.");
+    }
+
     /// <summary>
     /// Tracks users of the minimap.
     /// If the minimap texture is not used by anyone, we can save
@@ -236,6 +328,7 @@ public class MapView : IMapView, IMapScreenCropper
 
     public void AddRefreshPoint(Point2D point, int size = 1)
     {
+        radarTextureDirty = true;
         InvalidateMap();
     }
 
@@ -631,6 +724,10 @@ public class MapView : IMapView, IMapScreenCropper
         compositeRenderTargetCopy?.Dispose();
         alphaRenderTarget?.Dispose();
         minimapRenderTarget?.Dispose();
+
+        radarTexture?.Dispose();
+        radarTexture = null;
+        radarTextureDirty = true;
     }
 
     public void RefreshRenderTargets()

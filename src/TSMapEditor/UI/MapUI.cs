@@ -104,6 +104,7 @@ public class MapUI : XNAControl, ICursorActionTarget, IMutationTarget, IMapScree
         set => EditorState.CopiedMapData = value;
     }
     public Texture2D MinimapTexture => mapView.MinimapTexture;
+    public Texture2D MinimapDisplayTexture => mapView.MinimapDisplayTexture;
     public HashSet<object> MinimapUsers => mapView.MinimapUsers;
 
     public bool TryRequestScreenCrop(Rectangle cellRectangle, CancellationToken cancellationToken, out Task<byte[]> screenCropTask)
@@ -306,7 +307,7 @@ public class MapUI : XNAControl, ICursorActionTarget, IMutationTarget, IMapScree
         // We need to re-create our map textures
         mapView.RefreshRenderTargets();
 
-        windowController.MinimapWindow.MegamapTexture = mapView.MinimapTexture; // mapRenderTarget;
+        windowController.MinimapWindow.MegamapTexture = mapView.MinimapDisplayTexture; // mapRenderTarget;
         Map.RefreshCellLighting(EditorState.LightingPreviewState, EditorState.LightDisabledLightSources, null);
 
         // And then re-draw the whole map
@@ -456,9 +457,9 @@ public class MapUI : XNAControl, ICursorActionTarget, IMutationTarget, IMapScree
 
     public override void OnMouseEnter()
     {
-        if (isRightClickScrolling)
-            rightClickScrollInitPos = GetCursorPoint();
-
+        // stride-2048 fork: no re-anchoring here. Scrolling now continues while the cursor
+        // is over other UI panels, so re-anchoring on re-entry would reset the scroll speed
+        // that the user built up by dragging far from the anchor.
         base.OnMouseEnter();
     }
 
@@ -622,23 +623,26 @@ public class MapUI : XNAControl, ICursorActionTarget, IMutationTarget, IMapScree
         {
             if (!(WindowManager.SelectedControl is XNATextBox))
                 Camera.KeyboardUpdate(Keyboard, scrollRate);
-
-            if (isRightClickScrolling)
-            {
-                if (Cursor.RightDown)
-                {
-                    var newCursorPosition = GetCursorPoint();
-                    var result = newCursorPosition - rightClickScrollInitPos;
-                    float rightClickScrollRate = (float)((scrollRate / RightClickScrollRateDivisor) / Camera.ZoomLevel);
-
-                    Camera.FloatTopLeftPoint = new Vector2(Camera.FloatTopLeftPoint.X + result.X * rightClickScrollRate,
-                        Camera.FloatTopLeftPoint.Y + result.Y * rightClickScrollRate);
-                }
-            }
         }
-        else if (isRightClickScrolling)
+
+        // stride-2048 fork: right-click scrolling continues for as long as the button is held,
+        // even when the cursor moves over other UI panels or past the screen edge, and keeps
+        // accelerating with distance from the anchor point instead of stopping at panel borders.
+        if (isRightClickScrolling)
         {
-            StopRightClickScrolling();
+            if (Cursor.RightDown)
+            {
+                var newCursorPosition = GetCursorPoint();
+                var result = newCursorPosition - rightClickScrollInitPos;
+                float rightClickScrollRate = (float)((scrollRate / RightClickScrollRateDivisor) / Camera.ZoomLevel);
+
+                Camera.FloatTopLeftPoint = new Vector2(Camera.FloatTopLeftPoint.X + result.X * rightClickScrollRate,
+                    Camera.FloatTopLeftPoint.Y + result.Y * rightClickScrollRate);
+            }
+            else
+            {
+                StopRightClickScrolling();
+            }
         }
 
         if (leftPressedDownOnControl && !Cursor.LeftDown)
